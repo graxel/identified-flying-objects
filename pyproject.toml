@@ -1,0 +1,40 @@
+[project]
+name = "identified-flying-objects"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.17.2",
+    "apscheduler>=3.11.1",
+    "asyncpg>=0.31.0",
+    "greenlet>=3.2.4",
+    "kafka-python-ng>=2.2.3",
+    "mlflow>=3.6.0",
+    "opencv-python>=4.12.0.88",
+    "psycopg2-binary>=2.9.11",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "requests>=2.32.5",
+    "sqlalchemy>=2.0.44",
+    "streamlit>=1.51.0",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "ultralytics>=8.3.234",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+    "jupyter>=1.1.1",
+]
+
+[tool.uv]
+default-groups = []
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
