@@ -25,6 +25,8 @@ SED_SUBS="s|__USERNAME__|${USER_NAME}|g; s|__SERVER_DIR__|${SERVER_DIR}|g"
 sed "$SED_SUBS" "$SERVER_DIR/service_files/camera_relay.service" | sudo tee /etc/systemd/system/ifo_camera_relay.service > /dev/null
 
 
+sudo systemctl daemon-reload
+
 # enable and (re)start services
 services=(
     "ifo_camera_relay.service"
