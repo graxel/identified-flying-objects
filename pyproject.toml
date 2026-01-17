@@ -8,7 +8,10 @@ dependencies = [
     "alembic>=1.17.2",
     "apscheduler>=3.11.1",
     "asyncpg>=0.31.0",
+    "flask>=3.1.2",
+    "flask-cors>=6.0.1",
     "greenlet>=3.2.4",
+    "gunicorn>=23.0.0",
     "kafka-python-ng>=2.2.3",
     "mlflow>=3.6.0",
     "opencv-python>=4.12.0.88",
@@ -31,6 +34,11 @@ dev = [
 
 [tool.uv]
 default-groups = []
+
+[tool.uv.workspace]
+members = [
+    "utils",
+]
 
 [build-system]
 requires = ["setuptools", "wheel"]
