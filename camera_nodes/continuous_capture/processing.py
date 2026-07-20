@@ -58,6 +58,7 @@ def extract_patches_from_mapped(mapped_arr, ml_info):
 
 def processing_worker(
     frame_queue,
+    send_queue,
     outdir,
     main_size,
     low_res_size,
