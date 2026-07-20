@@ -3,10 +3,12 @@ set -euo pipefail
 
 GITHUB_REPO_CLONE_LINK="git@github.com:graxel/identified-flying-objects.git"
 REPO_NAME="identified-flying-objects"
+SERVICE_TEMPLATE_PATH="${HOME}/${REPO_NAME}/camera_nodes/services/camera.service"
 GITHUB_KEYS_URL="https://github.com/settings/keys"
 NODE_HOSTNAME="$(hostname)"
 SERVICES_DIR="${HOME}/services"
 SERVICE_FILE=camera.service
+
 
 # ---------------------------------------------------------------------------
 # SSH key for GitHub
@@ -83,7 +85,11 @@ SERVICE_FILE=camera.service
 # ---------------------------------------------------------------------------
 # Project scaffolding
 # ---------------------------------------------------------------------------
-    git clone ${GITHUB_REPO_CLONE_LINK}
+    if [[ ! -d "${REPO_NAME}/.git" ]]; then
+        git clone "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    else
+        git -C "${REPO_NAME}" pull
+    fi
 
     cd ${REPO_NAME}
     cd camera_nodes
@@ -93,29 +99,24 @@ SERVICE_FILE=camera.service
 # ---------------------------------------------------------------------------
 # systemd service (file lives in ~/services, symlinked into systemd)
 # ---------------------------------------------------------------------------
+    cd
     mkdir -p "${SERVICES_DIR}"
-    cat > "${SERVICES_DIR}/${SERVICE_FILE}" <<EOF
-    [Unit]
-    Description=Camera Capture Service
-    After=network.target
 
-    [Service]
-    User=${USER}
-    WorkingDirectory=${HOME}/${REPO_NAME}/camera_nodes/continuous_capture/
-    ExecStart=${HOME}/.local/bin/uv run ${HOME}/${REPO_NAME}/camera_nodes/continuous_capture/main.py
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    EOF
-
-    if [[ ! -e /etc/systemd/system/${SERVICE_FILE} ]]; then
-        sudo ln -s "${SERVICES_DIR}/${SERVICE_FILE}" /etc/systemd/system/${SERVICE_FILE}
+    if [[ ! -f "${SERVICE_TEMPLATE_PATH}" ]]; then
+        echo "Missing service template: ${SERVICE_TEMPLATE_PATH}" >&2
+        exit 1
     fi
 
+    sed \
+        -e "s|__SERVICE_USER__|$(id -un)|g" \
+        -e "s|__WORKING_DIRECTORY__|${HOME}/${REPO_NAME}/camera_nodes|g" \
+        -e "s|__UV_BIN__|${HOME}/.local/bin/uv|g" \
+        "${SERVICE_TEMPLATE_PATH}" > "${SERVICES_DIR}/${SERVICE_FILE}"
+
+    sudo ln -sfn "${SERVICES_DIR}/${SERVICE_FILE}" "/etc/systemd/system/${SERVICE_FILE}"
+
     sudo systemctl daemon-reload
-    sudo systemctl enable ${SERVICE_FILE}
+    sudo systemctl enable "${SERVICE_FILE}"
 
 # ---------------------------------------------------------------------------
 # Avahi: advertise IPv4 only, so <hostname>.local doesn't resolve to a
