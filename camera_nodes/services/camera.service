@@ -1,0 +1,14 @@
+[Unit]
+Description=Camera Capture Service
+After=network.target
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+WorkingDirectory=__WORKING_DIRECTORY__
+ExecStart=__UV_BIN__ run main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
