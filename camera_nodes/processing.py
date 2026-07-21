@@ -62,10 +62,16 @@ def processing_worker(
     outdir,
     main_size,
     low_res_size,
+    camera_id=0,
+    ml_size=(640, 480),
+    bg_rows=4,
+    bg_cols=4,
+    bg_interval_sec=1.0,
 ):
 
     main_w, main_h = main_size
     low_res_w, low_res_h = low_res_size
+    ml_w, ml_h = ml_size
 
     os.makedirs(outdir, exist_ok=True)
     timing_csv_path = os.path.join(outdir, "timing.csv")
@@ -103,12 +109,16 @@ def processing_worker(
                 "sensor_delta_ns",
                 "capture_start_delta_ns",
                 "proc_start_delta_ns",
-                "num_detections"
+                "num_detections",
+                "diff_latency_ns",
+                "patch_extract_latency_ns",
+                "bg_processing_latency_ns"
             ])
 
         prev_sensor_ts_ns = None
         prev_capture_start_ns = None
         prev_proc_start_ns = None
+        last_bg_send_time = 0.0
 
         while True:
             item = frame_queue.get()
@@ -133,12 +143,14 @@ def processing_worker(
                     # We copy it out so we can release the request buffer safely
                     low_res_gray = m_low_res.array[:low_res_h, :].copy()
                 
-                training_frame = cv2.resize(low_res_gray, (640, 480), interpolation=cv2.INTER_NEAREST)
+                training_frame = cv2.resize(low_res_gray, (ml_w, ml_h), interpolation=cv2.INTER_NEAREST)
 
                 history_buffer.append(low_res_gray)
                 
+                diff_latency_ns = 0
                 # 2. Perform Multi-Frame Differencing if we have enough history
                 if len(history_buffer) == NUM_DIFF_FRAMES:
+                    diff_start_ns = time.perf_counter_ns()
                     diffs = []
                     # Calculate absdiff between adjacent frames
                     for i in range(NUM_DIFF_FRAMES - 1):
@@ -174,11 +186,15 @@ def processing_worker(
                         patch_h = min(patch_h, main_h - patch_y)
                         
                         ml_info[idx] = {"x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h}
+                    diff_latency_ns = time.perf_counter_ns() - diff_start_ns
 
+                patch_extract_latency_ns = 0
                 # 5. Extract 12MP Patches (Zero-Copy) if motion was detected
                 if ml_info:
+                    patch_extract_start_ns = time.perf_counter_ns()
                     with MappedArray(request, "main") as m_main:
                         patch_dict = extract_patches_from_mapped(m_main.array, ml_info)
+                    patch_extract_latency_ns = time.perf_counter_ns() - patch_extract_start_ns
                 
                 map_done_ns = time.perf_counter_ns()
             finally:
@@ -188,10 +204,12 @@ def processing_worker(
 
             release_ns = time.perf_counter_ns()
 
-            # 7. Save patches to disk
+            # 7. Save patches to disk / send to queue
             for i, patch in patch_dict.items():
                 # np.save(os.path.join(outdir, f"{shot_id}_patch{i}.npy"), patch["px"])
                 send_queue.put({
+                    "packet_type": 0,
+                    "camera_id": camera_id,
                     "shot_id": shot_id,
                     "patch_id": i,
                     "sensor_ts_ns": sensor_ts_ns,
@@ -199,8 +217,69 @@ def processing_worker(
                     "y": patch["y"],
                     "w": patch["w"],
                     "h": patch["h"],
-                    "px": patch["px"],
+                    "px": patch["px"].tobytes(),
                 })
+
+            # 8. Check if it's time to send background frames (1 FPS)
+            bg_processing_latency_ns = 0
+            now_sec = time.time()
+            if now_sec - last_bg_send_time >= bg_interval_sec:
+                bg_processing_start_ns = time.perf_counter_ns()
+                last_bg_send_time = now_sec
+
+                # Enqueue uncompressed grayscale tiles (Type 1)
+                # Sliced into a grid of tiles
+                rows, cols = bg_rows, bg_cols
+                tile_h, tile_w = ml_h // rows, ml_w // cols
+                tile_id = 0
+                for r in range(rows):
+                    for c in range(cols):
+                        y_start = r * tile_h
+                        y_end = (r + 1) * tile_h
+                        x_start = c * tile_w
+                        x_end = (c + 1) * tile_w
+                        tile = training_frame[y_start:y_end, x_start:x_end]
+                        send_queue.put({
+                            "packet_type": 1,
+                            "camera_id": camera_id,
+                            "shot_id": shot_id,
+                            "patch_id": tile_id,
+                            "sensor_ts_ns": sensor_ts_ns,
+                            "x": x_start,
+                            "y": y_start,
+                            "w": tile_w,
+                            "h": tile_h,
+                            "px": tile.tobytes(),
+                        })
+                        tile_id += 1
+
+                # Enqueue JPEG grayscale tiles (Type 2)
+                # Sliced into a grid of tiles
+                tile_h_lores, tile_w_lores = low_res_h // rows, low_res_w // cols
+                tile_id = 0
+                for r in range(rows):
+                    for c in range(cols):
+                        y_start = r * tile_h_lores
+                        y_end = (r + 1) * tile_h_lores
+                        x_start = c * tile_w_lores
+                        x_end = (c + 1) * tile_w_lores
+                        tile = low_res_gray[y_start:y_end, x_start:x_end]
+                        success, jpeg_bytes = cv2.imencode('.jpg', tile, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                        if success:
+                            send_queue.put({
+                                "packet_type": 2,
+                                "camera_id": camera_id,
+                                "shot_id": shot_id,
+                                "patch_id": tile_id,
+                                "sensor_ts_ns": sensor_ts_ns,
+                                "x": x_start,
+                                "y": y_start,
+                                "w": tile_w_lores,
+                                "h": tile_h_lores,
+                                "px": jpeg_bytes.tobytes(),
+                            })
+                        tile_id += 1
+                bg_processing_latency_ns = time.perf_counter_ns() - bg_processing_start_ns
 
             proc_done_ns = time.perf_counter_ns()
 
@@ -248,7 +327,10 @@ def processing_worker(
                 sensor_delta_ns,
                 capture_start_delta_ns,
                 proc_start_delta_ns,
-                len(ml_info)
+                len(ml_info),
+                diff_latency_ns,
+                patch_extract_latency_ns,
+                bg_processing_latency_ns
             ])
             csv_file.flush()
 

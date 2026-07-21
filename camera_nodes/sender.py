@@ -1,50 +1,45 @@
 # sender.py
 
-import io
-import time
-
-import numpy as np
-import requests
+import socket
+import struct
 
 
-def net_send_worker(send_queue, send_dest, connect_timeout=0.5, read_timeout=2.0):
-    session = requests.Session()
+def net_send_worker(send_queue, send_dest):
+    """
+    Worker thread that pulls patches from the send_queue and transmits them
+    over raw UDP to send_dest (a tuple of (host, port)).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    header_struct = struct.Struct("!4sBBHQHHHHHH")
 
     while True:
         item = send_queue.get()
         try:
-            buf = io.BytesIO()
-            np.save(buf, item["px"], allow_pickle=False)
-            buf.seek(0)
+            px_bytes = item["px"]
 
-            data = {
-                "shot_id": item["shot_id"],
-                "patch_id": str(item["patch_id"]),
-                "sensor_ts_ns": str(item["sensor_ts_ns"]),
-                "x": str(item["x"]),
-                "y": str(item["y"]),
-                "w": str(item["w"]),
-                "h": str(item["h"]),
-            }
-
-            files = {
-                "patch": (
-                    f'{item["shot_id"]}_patch{item["patch_id"]}.npy',
-                    buf.getvalue(),
-                    "application/octet-stream",
-                )
-            }
-
-            resp = session.post(
-                send_dest,
-                data=data,
-                files=files,
-                timeout=(connect_timeout, read_timeout),
+            header = header_struct.pack(
+                b"IFOP",
+                item["packet_type"],
+                0,  # padding
+                item["camera_id"],
+                item["sensor_ts_ns"],
+                item["patch_id"],
+                0,  # unused/reserved
+                item["x"],
+                item["y"],
+                item["w"],
+                item["h"],
             )
-            resp.raise_for_status()
 
-        except requests.RequestException as e:
-            print(f"[warn] send failed for {item['shot_id']} patch {item['patch_id']}: {e}")
-            time.sleep(0.01)
+            # Construct the full packet
+            packet = header + px_bytes
+
+            sock.sendto(packet, send_dest)
+
+        except Exception as e:
+            print(
+                f"[warn] UDP send failed for camera {item.get('camera_id')} "
+                f"patch {item.get('patch_id')} (timestamp {item.get('sensor_ts_ns')}): {e}"
+            )
         finally:
             send_queue.task_done()
