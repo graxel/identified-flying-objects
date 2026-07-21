@@ -20,3 +20,6 @@ Thumbs.db
 # IDE Stuff
 .vscode/
 
+# Data Stuff
+received_patches/
+captures/

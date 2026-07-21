@@ -3,11 +3,43 @@
 import os
 import csv
 import time
+import struct
 import collections
 import random
 import cv2
 import numpy as np
 from picamera2 import MappedArray
+
+
+HEARTBEAT_STRUCT = struct.Struct("!ffHHIf")
+TELEMETRY_STRUCT = struct.Struct("!fffffff")
+
+
+def _read_cpu_temp_c():
+    """Read CPU temperature from sysfs. Returns 0.0 on failure."""
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            return int(f.read().strip()) / 1000.0
+    except (OSError, ValueError):
+        return 0.0
+
+
+def _read_mem_used_pct():
+    """Read memory usage percentage from /proc/meminfo. Returns 0.0 on failure."""
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if parts[0] in ("MemTotal:", "MemAvailable:"):
+                    info[parts[0]] = int(parts[1])
+                if len(info) == 2:
+                    break
+        total = info["MemTotal:"]
+        available = info["MemAvailable:"]
+        return (total - available) / total * 100.0
+    except (OSError, ValueError, KeyError, ZeroDivisionError):
+        return 0.0
 
 
 
@@ -67,7 +99,12 @@ def processing_worker(
     bg_rows=4,
     bg_cols=4,
     bg_interval_sec=1.0,
+    heartbeat_interval_sec=5.0,
+    shared_stats=None,
 ):
+
+    if shared_stats is None:
+        shared_stats = {}
 
     main_w, main_h = main_size
     low_res_w, low_res_h = low_res_size
@@ -119,6 +156,10 @@ def processing_worker(
         prev_capture_start_ns = None
         prev_proc_start_ns = None
         last_bg_send_time = 0.0
+        last_heartbeat_time = 0.0
+        frames_processed = 0
+        fps_window_start = time.monotonic()
+        fps_frame_count = 0
 
         while True:
             item = frame_queue.get()
@@ -305,6 +346,30 @@ def processing_worker(
                 if prev_proc_start_ns is not None
                 else None
             )
+            
+            # --- Frame Telemetry (Packet Type 4) ---
+            cap_ms = capture_latency_ns / 1e6
+            proc_ms = processing_latency_ns / 1e6
+            map_ms = map_latency_ns / 1e6
+            diff_ms = diff_latency_ns / 1e6
+            ext_ms = patch_extract_latency_ns / 1e6
+            bg_ms = bg_processing_latency_ns / 1e6
+            
+            # sender.py still writes the latest send latency here
+            last_send_ms = shared_stats.get("send_ms", 0.0)
+
+            telemetry_payload = TELEMETRY_STRUCT.pack(cap_ms, proc_ms, last_send_ms, map_ms, diff_ms, ext_ms, bg_ms)
+            
+            send_queue.put({
+                "packet_type": 4,
+                "camera_id": camera_id,
+                "shot_id": shot_id,
+                "patch_id": 0,
+                "sensor_ts_ns": sensor_ts_ns,
+                "x": 0, "y": 0, "w": 0, "h": 0,
+                "px": telemetry_payload
+            })
+            # ---------------------------------------
 
             writer.writerow([
                 shot_id,
@@ -337,5 +402,43 @@ def processing_worker(
             prev_sensor_ts_ns = sensor_ts_ns
             prev_capture_start_ns = capture_start_ns
             prev_proc_start_ns = proc_start_ns
+
+            frames_processed += 1
+            fps_frame_count += 1
+
+            # 9. Send heartbeat packet (Type 3) at configured interval
+            now_hb = time.time()
+            if now_hb - last_heartbeat_time >= heartbeat_interval_sec:
+                elapsed = time.monotonic() - fps_window_start
+                current_fps = fps_frame_count / elapsed if elapsed > 0 else 0.0
+                fps_window_start = time.monotonic()
+                fps_frame_count = 0
+
+                heartbeat_payload = HEARTBEAT_STRUCT.pack(
+                    _read_cpu_temp_c(),
+                    _read_mem_used_pct(),
+                    frame_queue.qsize(),
+                    send_queue.qsize(),
+                    frames_processed,
+                    current_fps,
+                )
+
+                # Periodically print stats to local console for local debugging
+                print(f"[Camera {camera_id} Stats] FPS: {current_fps:.1f} | Q(F/S): {frame_queue.qsize()}/{send_queue.qsize()} | "
+                      f"Latest Latencies (ms) -> Capture: {cap_ms:.1f}, Proc: {proc_ms:.1f}, Send: {last_send_ms:.1f}")
+
+                send_queue.put({
+                    "packet_type": 3,
+                    "camera_id": camera_id,
+                    "shot_id": shot_id,
+                    "patch_id": 0,
+                    "sensor_ts_ns": sensor_ts_ns,
+                    "x": 0,
+                    "y": 0,
+                    "w": 0,
+                    "h": 0,
+                    "px": heartbeat_payload,
+                })
+                last_heartbeat_time = now_hb
 
             frame_queue.task_done()

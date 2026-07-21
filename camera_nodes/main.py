@@ -11,6 +11,7 @@ from sender import net_send_worker
 import socket
 
 OUTDIR = "captures"
+SEND_LOG_DIR = "send_logs"
 SEND_DEST = ("graxel.local", 8000)
 
 FRAME_QUEUE_MAX = 8
@@ -22,10 +23,12 @@ ML_SIZE = (640, 480)
 BG_ROWS = 4
 BG_COLS = 4
 BG_INTERVAL_SEC = 1.0
+HEARTBEAT_INTERVAL_SEC = 5.0
 
 
 def main():
     os.makedirs(OUTDIR, exist_ok=True)
+    os.makedirs(SEND_LOG_DIR, exist_ok=True)
 
     gc.disable()
 
@@ -40,6 +43,7 @@ def main():
 
     frame_queue = queue.Queue(FRAME_QUEUE_MAX)
     send_queue = queue.Queue(SEND_QUEUE_MAX)
+    shared_stats = {"send_ms": 0.0}
 
     threading.Thread(
         target=camera_worker,
@@ -59,13 +63,15 @@ def main():
             "bg_rows": BG_ROWS,
             "bg_cols": BG_COLS,
             "bg_interval_sec": BG_INTERVAL_SEC,
+            "heartbeat_interval_sec": HEARTBEAT_INTERVAL_SEC,
+            "shared_stats": shared_stats,
         },
         daemon=True,
     ).start()
 
     threading.Thread(
         target=net_send_worker,
-        args=(send_queue, SEND_DEST),
+        args=(send_queue, SEND_DEST, SEND_LOG_DIR, shared_stats),
         daemon=True,
     ).start()
 
