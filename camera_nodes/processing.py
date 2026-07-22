@@ -56,13 +56,14 @@ def parse_ml_output(metadata, main_size, low_res_size):
     main_w, main_h = main_size
     num_objects = random.randint(1, 10)
     for i in range(num_objects):
-        r = (5 * random.random()) ** (1 / 3)
+        r = (1 * random.random()) ** (1 / 3)
         # Cap size to 140 to prevent exceeding UDP maximum packet size (~65KB)
         raw_size = int(8 * int(4 / (r + 0.001)) / 4)
         size = min(140, raw_size)
         x = random.randint(0, main_w - size)
         y = random.randint(0, main_h - size)
         ml_info[i] = {"x": x, "y": y, "w": size, "h": size}
+    print([patch['w'] for patch in ml_info.values()])
     return ml_info
 
 
