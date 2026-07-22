@@ -289,8 +289,8 @@ class FrameProcessor:
         motion_info, _ = perform_motion_differencing(
             self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
         )
-        if motion_info:
-            ml_info = motion_info
+        # if motion_info:
+        #     ml_info = motion_info
 
         patch_dict = {}
         if ml_info:
