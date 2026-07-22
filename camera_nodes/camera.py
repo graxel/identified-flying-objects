@@ -13,7 +13,7 @@ def set_up_camera(main_size, low_res_size):
     # Main: Uncompressed 12MP RGB
     # Low Res: Downscaled Grayscale (YUV420)
     config = picam2.create_preview_configuration(
-        main={"size": main_size, "format": "RGB888"},
+        main={"size": main_size, "format": "BGR888"},
         lores={"size": low_res_size, "format": "YUV420"},
         raw=None,
         buffer_count=2,
@@ -45,6 +45,8 @@ def set_up_camera(main_size, low_res_size):
         {
             "AeEnable": False,
             "AwbEnable": False,
+            "HFlip": 1,
+            "VFlip": 1,
             # "ExposureTime": 10000,
             # "AnalogueGain": 1.0,
             # "ColourGains": (1.5, 1.5),
