@@ -3,6 +3,7 @@
 import time
 import queue
 from picamera2 import Picamera2
+from libcamera import Transform
 from threading_utils import try_pin_and_prioritize
 
 
@@ -15,6 +16,7 @@ def set_up_camera(main_size, low_res_size):
     config = picam2.create_preview_configuration(
         main={"size": main_size, "format": "RGB888"},
         lores={"size": low_res_size, "format": "YUV420"},
+        transform=Transform(hflip=1, vflip=1),
         raw=None,
         buffer_count=2,
         display="main",
@@ -45,8 +47,6 @@ def set_up_camera(main_size, low_res_size):
         {
             "AeEnable": False,
             "AwbEnable": False,
-            "HFlip": 1,
-            "VFlip": 1,
             # "ExposureTime": 10000,
             # "AnalogueGain": 1.0,
             # "ColourGains": (1.5, 1.5),
