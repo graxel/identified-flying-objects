@@ -58,7 +58,7 @@ def parse_ml_output(metadata, main_size, low_res_size):
     for i in range(num_objects):
         r = (1 * random.random()) ** (1 / 3)
         # Cap size to 140 to prevent exceeding UDP maximum packet size (~65KB)
-        raw_size = int(8 * int(4 / (r + 0.001)) / 4)
+        raw_size = int(32 * int(4 / (r + 0.001)) / 4)
         size = min(140, raw_size)
         x = random.randint(0, main_w - size)
         y = random.randint(0, main_h - size)
