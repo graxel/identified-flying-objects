@@ -54,7 +54,7 @@ def set_up_camera(main_size, low_res_size):
 
 def camera_worker(
     picam2,
-    frame_queue,
+    processing_queue,
     core_id=None,
     realtime_priority=None,
 ):
@@ -63,7 +63,6 @@ def camera_worker(
     shot_num = 0
     while True:
         # Capture a fresh request from the pipeline continuously
-        # Note: flush=True is removed to keep the pipeline saturated and latency minimum
         capture_start_ns = time.perf_counter_ns()
         req = picam2.capture_request()
         capture_done_ns = time.perf_counter_ns()
@@ -78,23 +77,25 @@ def camera_worker(
         clock_offset_ns = real_now - mono_now
         global_sensor_ts_ns = sensor_monotonic_ns + clock_offset_ns
 
-        queue_put_ns = time.perf_counter_ns()
         shot_id = f"frame_{shot_num:06d}"
-
-        item = {
+        queue_put_ns = time.perf_counter_ns()
+        
+        capture_obj = {
             "shot_id": shot_id,
-            "sensor_ts_ns": global_sensor_ts_ns, # We output the globally synced timestamp
-            "raw_monotonic_ts_ns": sensor_monotonic_ns,
-            "capture_start_ns": capture_start_ns,
-            "capture_done_ns": capture_done_ns,
-            "frame_duration_us": frame_duration_us,
-            "queue_put_ns": queue_put_ns,
             "metadata": metadata,
             "request": req,
+            "timestamps": {
+                "sensor_ts_ns": global_sensor_ts_ns,
+                "raw_monotonic_ts_ns": sensor_monotonic_ns,
+                "capture_start_ns": capture_start_ns,
+                "capture_done_ns": capture_done_ns,
+                "frame_duration_us": frame_duration_us,
+                "queue_put_ns": queue_put_ns,
+            }
         }
         
         try:
-            frame_queue.put_nowait(item)
+            processing_queue.put_nowait(capture_obj)
         except queue.Full:
             # If processing can't keep up, drop this frame and reuse the buffer
             req.release()
