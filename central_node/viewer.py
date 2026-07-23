@@ -95,7 +95,7 @@ def main():
     ORIG_W, ORIG_H = 4056, 3040
     CANVAS_W, CANVAS_H = ORIG_W // SCALE, ORIG_H // SCALE
     
-    LOW_RES_W, LOW_RES_H = 800, 600
+    LOW_RES_W, LOW_RES_H = 640, 480 #800, 600
     ML_W, ML_H = 640, 480
 
     STATS_PANEL_W = 280  # Extra width for the stats side panel
@@ -107,7 +107,7 @@ def main():
     # Patches layer (display-resolution)
     patches_bgr = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
     patches_alpha = np.zeros((CANVAS_H, CANVAS_W), dtype=np.float32)
-    fade_factor = 0.999
+    fade_factor = 1.0
 
     # EMA-smoothed telemetry stats
     EMA_ALPHA = 0.15  # Smoothing factor (higher = more responsive, noisier)
@@ -166,18 +166,18 @@ def main():
                             patches_bgr[disp_y:y_end, disp_x:x_end] = patch_scaled[:valid_h, :valid_w]
                             patches_alpha[disp_y:y_end, disp_x:x_end] = 1.0
 
-                # elif ptype == 1:
-                #     # Type 1: Raw Grayscale Tiles (ML space: 640x480)
-                #     # Paste directly into native-resolution ml_canvas (no scaling)
-                #     expected_len = w * h
-                #     if len(px_bytes) == expected_len:
-                #         tile_gray = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w))
-                #         x_end = min(x + w, ML_W)
-                #         y_end = min(y + h, ML_H)
-                #         vw = x_end - x
-                #         vh = y_end - y
-                #         if vw > 0 and vh > 0:
-                #             ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
+                elif ptype == 1:
+                    # Type 1: Raw Grayscale Tiles (ML space: 640x480)
+                    # Paste directly into native-resolution ml_canvas (no scaling)
+                    expected_len = w * h
+                    if len(px_bytes) == expected_len:
+                        tile_gray = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w))
+                        x_end = min(x + w, ML_W)
+                        y_end = min(y + h, ML_H)
+                        vw = x_end - x
+                        vh = y_end - y
+                        if vw > 0 and vh > 0:
+                            ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
 
                 elif ptype == 2:
                     # Type 2: JPEG Tiles (Low-Res space: 800x600)
@@ -228,11 +228,11 @@ def main():
             # --- Render Pass ---
 
             # 1. Scale native tile canvases to display resolution (single resize = perfect alignment)
-            ml_display = cv2.resize(ml_canvas, (CANVAS_W, CANVAS_H), interpolation=cv2.INTER_NEAREST)
-            ml_display_bgr = cv2.cvtColor(ml_display, cv2.COLOR_GRAY2BGR)
+            lores_display = cv2.resize(lores_canvas, (CANVAS_W, CANVAS_H), interpolation=cv2.INTER_NEAREST)
+            lores_display_bgr = cv2.cvtColor(lores_display, cv2.COLOR_GRAY2BGR)
 
-            # Use ml tiles as the base background layer
-            tiles_layer = ml_display_bgr
+            # Use lores tiles as the base background layer
+            tiles_layer = lores_display_bgr
 
             # 2. Fade the patch alpha layer towards transparency
             patches_alpha *= fade_factor

@@ -51,7 +51,7 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
             system = frame_obj["system"]
             sensor_ts_ns = frame_timestamps["sensor_ts_ns"]
             
-            # Helper to pack and send a single packet
+            # Helper to pack and send a single packet using scatter/gather I/O (zero-copy concat)
             def _send_packet(packet_type, item_id, x, y, w, h, px_bytes):
                 header = header_struct.pack(
                     b"IFOP",
@@ -63,7 +63,11 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
                     0,  # unused/reserved
                     x, y, w, h
                 )
-                sock.sendto(header + px_bytes, send_dest)
+                # sendmsg takes a list of buffers and avoids allocating a new concatenated bytes object
+                if px_bytes:
+                    sock.sendmsg([header, px_bytes], [], 0, send_dest)
+                else:
+                    sock.sendmsg([header], [], 0, send_dest)
 
             # 1. Send patches (Type 0)
             for patch_id, patch in enumerate(frame_obj.get("patches", [])):
