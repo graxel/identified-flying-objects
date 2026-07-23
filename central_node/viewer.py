@@ -11,7 +11,7 @@ import time
 TELEMETRY_STRUCT = struct.Struct("!7f d 2f 2H")
 
 
-def network_worker(sock, data_queue):
+def network_worker(sock, data_queue, packet_counts):
     """
     Dedicated thread to receive UDP packets and push them to a queue.
     This prevents the UI loop from blocking the network buffer and dropping packets.
@@ -53,6 +53,12 @@ def network_worker(sock, data_queue):
                     "h": h,
                     "px_bytes": data[header_size:]
                 })
+                packet_counts[packet_type] = packet_counts.get(packet_type, 0) + 1
+        except socket.timeout:
+            continue  # Normal idle, loop and wait for more data
+        except OSError:
+            # Socket was explicitly closed (viewer shutting down)
+            break
         except Exception as e:
             print(f"Network worker error: {e}")
             break
@@ -68,16 +74,18 @@ def main():
     if hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind((host, port))
+    sock.settimeout(1.0)  # Allow network thread to wake up and notice if socket is closed
 
     print(f"UDP Viewer listening on {host}:{port}")
 
     # 2. Setup Threading Queue
     data_queue = queue.Queue(maxsize=2000)
+    packet_counts = {}  # {packet_type: total_count}, updated by network thread
 
     # 3. Start Network Thread
     net_thread = threading.Thread(
         target=network_worker,
-        args=(sock, data_queue),
+        args=(sock, data_queue, packet_counts),
         daemon=True
     )
     net_thread.start()
@@ -99,7 +107,7 @@ def main():
     # Patches layer (display-resolution)
     patches_bgr = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
     patches_alpha = np.zeros((CANVAS_H, CANVAS_W), dtype=np.float32)
-    fade_factor = 0.97
+    fade_factor = 0.999
 
     # EMA-smoothed telemetry stats
     EMA_ALPHA = 0.15  # Smoothing factor (higher = more responsive, noisier)
@@ -158,25 +166,28 @@ def main():
                             patches_bgr[disp_y:y_end, disp_x:x_end] = patch_scaled[:valid_h, :valid_w]
                             patches_alpha[disp_y:y_end, disp_x:x_end] = 1.0
 
-                elif ptype == 1:
-                    # Type 1: Raw Grayscale Tiles (ML space: 640x480)
-                    # Paste directly into native-resolution ml_canvas (no scaling)
-                    expected_len = w * h
-                    if len(px_bytes) == expected_len:
-                        tile_gray = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w))
-                        x_end = min(x + w, ML_W)
-                        y_end = min(y + h, ML_H)
-                        vw = x_end - x
-                        vh = y_end - y
-                        if vw > 0 and vh > 0:
-                            ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
+                # elif ptype == 1:
+                #     # Type 1: Raw Grayscale Tiles (ML space: 640x480)
+                #     # Paste directly into native-resolution ml_canvas (no scaling)
+                #     expected_len = w * h
+                #     if len(px_bytes) == expected_len:
+                #         tile_gray = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w))
+                #         x_end = min(x + w, ML_W)
+                #         y_end = min(y + h, ML_H)
+                #         vw = x_end - x
+                #         vh = y_end - y
+                #         if vw > 0 and vh > 0:
+                #             ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
 
                 elif ptype == 2:
                     # Type 2: JPEG Tiles (Low-Res space: 800x600)
                     tile_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
                     if tile_decoded is not None:
-                        x_end = min(x + w, LOW_RES_W)
-                        y_end = min(y + h, LOW_RES_H)
+                        # Use the decoded tile's actual shape — JPEG chroma subsampling can round
+                        # dimensions differently from the header's w/h, causing shape mismatches.
+                        actual_h, actual_w = tile_decoded.shape[:2]
+                        x_end = min(x + actual_w, LOW_RES_W)
+                        y_end = min(y + actual_h, LOW_RES_H)
                         vw = x_end - x
                         vh = y_end - y
                         if vw > 0 and vh > 0:
@@ -285,6 +296,26 @@ def main():
             for label, val_str in sys_labels:
                 cv2.putText(stats_panel, label, (x_label, y), font, font_scale, color_label, 1)
                 cv2.putText(stats_panel, val_str, (x_value, y), font, font_scale, color_value, 1)
+                y += line_height
+
+            # Separator
+            y += 10
+            cv2.line(stats_panel, (x_label, y), (STATS_PANEL_W - x_label, y), (80, 80, 80), 1)
+            y += 20
+
+            # Packet counts (live diagnostics)
+            cv2.putText(stats_panel, "PACKETS RX", (x_label, y), font, 0.65, color_header, 2)
+            y += line_height + 10
+
+            pkt_labels = [
+                ("Patches (T0)", packet_counts.get(0, 0)),
+                ("ML Tiles (T1)", packet_counts.get(1, 0)),
+                ("LoRes Tiles (T2)", packet_counts.get(2, 0)),
+                ("Telemetry (T4)", packet_counts.get(4, 0)),
+            ]
+            for label, count in pkt_labels:
+                cv2.putText(stats_panel, label, (x_label, y), font, font_scale, color_label, 1)
+                cv2.putText(stats_panel, str(count), (x_value, y), font, font_scale, color_value, 1)
                 y += line_height
 
             # 5. Concatenate video + stats panel horizontally

@@ -69,9 +69,9 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
             for patch_id, patch in enumerate(frame_obj.get("patches", [])):
                 _send_packet(0, patch_id, patch["x"], patch["y"], patch["w"], patch["h"], patch["px"])
 
-            # 2. Send ml_train_tiles (Type 1)
-            for tile in frame_obj.get("ml_train_tiles", []):
-                _send_packet(1, tile["tile_id"], tile["x"], tile["y"], tile["w"], tile["h"], tile["px"])
+            # # 2. Send ml_train_tiles (Type 1)
+            # for tile in frame_obj.get("ml_train_tiles", []):
+            #     _send_packet(1, tile["tile_id"], tile["x"], tile["y"], tile["w"], tile["h"], tile["px"])
 
             # 3. Send low_res_tiles (Type 2)
             for tile in frame_obj.get("low_res_tiles", []):
