@@ -7,6 +7,14 @@ import socket
 import struct
 
 
+# New telemetry struct: 7 floats (ms durations) + 1 double (wall_time epoch) + 2 floats (sys) + 2 unsigned shorts (queues)
+# cap_ms, diff_ms, bbox_ms, ml_train_ms, extract_ms, pack_ms, send_ms,
+# send_wall_time (epoch seconds as double for transit calc),
+# cpu_temp_c, mem_used_pct,
+# proc_q_size, send_q_size
+TELEMETRY_STRUCT = struct.Struct("!7f d 2f 2H")
+
+
 def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
     """
     Worker thread that pulls an atomic one_fully_processed_obj from the send_queue.
@@ -15,7 +23,6 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     header_struct = struct.Struct("!4sBBHQHHHHHH")
-    telemetry_struct = struct.Struct("!11Q")  # 11 unsigned long longs
     
     # Prepare CSV log file
     os.makedirs(log_dir, exist_ok=True)
@@ -25,9 +32,9 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
     writer.writerow([
         "shot_id", "camera_id", "sensor_ts_ns", 
         "capture_start_ns", "capture_done_ns", "queue_put_ns",
-        "map_start_ns", "map_done_ns", "release_ns",
         "proc_start_ns", "proc_done_ns", 
-        "send_start_ns", "send_done_ns"
+        "send_start_ns", "send_done_ns",
+        "diff_ms", "bbox_ms", "ml_train_ms", "extract_ms", "pack_ms", "send_ms",
     ])
 
     frames_sent = 0
@@ -40,6 +47,8 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
             camera_id = frame_obj["camera_id"]
             frame_timestamps = frame_obj["timestamps"]["capture"]
             proc_timestamps = frame_obj["timestamps"]["processing"]
+            step_ms = frame_obj["step_durations_ms"]
+            system = frame_obj["system"]
             sensor_ts_ns = frame_timestamps["sensor_ts_ns"]
             
             # Helper to pack and send a single packet
@@ -68,43 +77,37 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
             for tile in frame_obj.get("low_res_tiles", []):
                 _send_packet(2, tile["tile_id"], tile["x"], tile["y"], tile["w"], tile["h"], tile["px"])
 
-            # 4. Send telemetry (Type 4)
-            # We pack 11 raw timestamps
-            telemetry_payload = telemetry_struct.pack(
-                frame_timestamps["sensor_ts_ns"],
-                frame_timestamps["capture_start_ns"],
-                frame_timestamps["capture_done_ns"],
-                frame_timestamps["queue_put_ns"],
-                proc_timestamps["map_start_ns"],
-                proc_timestamps["map_done_ns"],
-                proc_timestamps["release_ns"],
-                proc_timestamps["proc_start_ns"],
-                proc_timestamps["proc_done_ns"],
-                send_start_ns,
-                0 # send_done_ns will be 0 here since it hasn't finished
+            send_done_ns = time.perf_counter_ns()
+            send_ms = (send_done_ns - send_start_ns) / 1e6
+            cap_ms = (frame_timestamps["capture_done_ns"] - frame_timestamps["capture_start_ns"]) / 1e6
+
+            # 4. Send unified telemetry (Type 4) — every frame
+            telemetry_payload = TELEMETRY_STRUCT.pack(
+                cap_ms,
+                step_ms["diff_ms"],
+                step_ms["bbox_ms"],
+                step_ms["ml_train_ms"],
+                step_ms["extract_ms"],
+                step_ms["pack_ms"],
+                send_ms,
+                time.time(),  # wall clock epoch for transit time calculation
+                system["cpu_temp_c"],
+                system["mem_used_pct"],
+                system["proc_q_size"],
+                system["send_q_size"],
             )
             _send_packet(4, 0, 0, 0, 0, 0, telemetry_payload)
-
-            # 5. Send heartbeat (Type 3)
-            heartbeat_payload = frame_obj.get("heartbeat_payload")
-            if heartbeat_payload:
-                _send_packet(3, 0, 0, 0, 0, 0, heartbeat_payload)
-
-            send_done_ns = time.perf_counter_ns()
             
-            latency_ns = send_done_ns - send_start_ns
-            latency_ms = latency_ns / 1e6
-            
-            # EMA for send latency to display on heartbeat
-            shared_stats["send_ms"] = 0.9 * shared_stats.get("send_ms", latency_ms) + 0.1 * latency_ms
+            # EMA for send latency (shared with processing thread for console log)
+            shared_stats["send_ms"] = 0.9 * shared_stats.get("send_ms", send_ms) + 0.1 * send_ms
             
             # Log local timing CSV
             writer.writerow([
                 frame_obj["shot_id"], camera_id, sensor_ts_ns,
                 frame_timestamps["capture_start_ns"], frame_timestamps["capture_done_ns"], frame_timestamps["queue_put_ns"],
-                proc_timestamps["map_start_ns"], proc_timestamps["map_done_ns"], proc_timestamps["release_ns"],
                 proc_timestamps["proc_start_ns"], proc_timestamps["proc_done_ns"],
-                send_start_ns, send_done_ns
+                send_start_ns, send_done_ns,
+                step_ms["diff_ms"], step_ms["bbox_ms"], step_ms["ml_train_ms"], step_ms["extract_ms"], step_ms["pack_ms"], send_ms,
             ])
             
             frames_sent += 1

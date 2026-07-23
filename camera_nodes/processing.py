@@ -11,8 +11,8 @@ import numpy as np
 from picamera2 import MappedArray
 
 
-HEARTBEAT_STRUCT = struct.Struct("!ffHHIf")
 NUM_DIFF_FRAMES = 3  # Configurable multi-frame subtraction length
+CONSOLE_LOG_INTERVAL = 50  # Print stats every N frames
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,6 @@ class FrameProcessor:
         # Intervals
         self.ml_train_interval_sec = ml_train_interval_sec
         self.low_res_interval_sec = low_res_interval_sec
-        self.heartbeat_interval_sec = heartbeat_interval_sec
 
         # CV state
         self.history_buffer = collections.deque(maxlen=NUM_DIFF_FRAMES)
@@ -195,7 +194,6 @@ class FrameProcessor:
         # Interval timers
         self.last_ml_train_send_time = 0.0
         self.last_low_res_send_time = 0.0
-        self.last_heartbeat_time = 0.0
 
         # Frame counters
         self.frames_processed = 0
@@ -218,7 +216,6 @@ class FrameProcessor:
     def _process_one_frame(self):
         capture_obj = self.processing_queue.get()
         proc_start_ns = time.perf_counter_ns()
-        map_start_ns = time.perf_counter_ns()
 
         request = capture_obj["request"]
         shot_id = capture_obj["shot_id"]
@@ -227,26 +224,29 @@ class FrameProcessor:
         sensor_ts_ns = frame_timestamps["sensor_ts_ns"]
 
         ml_info = parse_ml_output(capture_obj["metadata"], self.main_size, self.low_res_size)  # TODO: real model
-        patch_dict = {}
 
         try:
-            low_res_gray, ml_train_frame, ml_info, patch_dict = self._extract_and_detect(request, ml_info)
-            map_done_ns = time.perf_counter_ns()
+            low_res_gray, ml_train_frame, ml_info, patch_dict, step_timings = self._extract_and_detect(request, ml_info)
         finally:
             request.release()
 
-        release_ns = time.perf_counter_ns()
-
+        pack_start_ns = time.perf_counter_ns()
         patches = self._generate_patches_list(patch_dict)
         ml_train_tiles, low_res_tiles = self._generate_tiles_lists(ml_train_frame, low_res_gray)
-        heartbeat_payload = self._maybe_generate_heartbeat(shot_id, sensor_ts_ns)
+        pack_done_ns = time.perf_counter_ns()
 
         proc_done_ns = time.perf_counter_ns()
 
+        # Per-step durations in milliseconds (computed here, sent via telemetry)
+        step_durations_ms = {
+            "diff_ms": step_timings["diff_ns"] / 1e6,
+            "bbox_ms": step_timings["bbox_ns"] / 1e6,
+            "ml_train_ms": step_timings["ml_train_ns"] / 1e6,
+            "extract_ms": step_timings["extract_ns"] / 1e6,
+            "pack_ms": (pack_done_ns - pack_start_ns) / 1e6,
+        }
+
         proc_timestamps = {
-            "map_start_ns": map_start_ns,
-            "map_done_ns": map_done_ns,
-            "release_ns": release_ns,
             "proc_start_ns": proc_start_ns,
             "proc_done_ns": proc_done_ns,
         }
@@ -255,7 +255,6 @@ class FrameProcessor:
             "shot_id": shot_id,
             "camera_id": self.camera_id,
             "metadata": capture_obj["metadata"],
-            "request": request,  # Passed for completion if needed by someone, though it's released
             "patches": patches,
             "ml_train_tiles": ml_train_tiles,
             "low_res_tiles": low_res_tiles,
@@ -263,13 +262,33 @@ class FrameProcessor:
                 "capture": frame_timestamps,
                 "processing": proc_timestamps,
             },
-            "heartbeat_payload": heartbeat_payload
+            "step_durations_ms": step_durations_ms,
+            "system": {
+                "cpu_temp_c": _read_cpu_temp_c(),
+                "mem_used_pct": _read_mem_used_pct(),
+                "proc_q_size": self.processing_queue.qsize(),
+                "send_q_size": self.send_queue.qsize(),
+            },
         }
 
         self.send_queue.put(one_fully_processed_obj)
 
         self.frames_processed += 1
         self.fps_frame_count += 1
+
+        # Periodic console log (replaces heartbeat)
+        if self.frames_processed % CONSOLE_LOG_INTERVAL == 0:
+            elapsed = time.monotonic() - self.fps_window_start
+            fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
+            self.fps_window_start = time.monotonic()
+            self.fps_frame_count = 0
+            send_ms = self.shared_stats.get("send_ms", 0.0)
+            print(
+                f"[Camera {self.camera_id}] FPS: {fps:.1f} | "
+                f"Q(P/S): {self.processing_queue.qsize()}/{self.send_queue.qsize()} | "
+                f"Send: {send_ms:.1f}ms"
+            )
+
         self.processing_queue.task_done()
 
     # ------------------------------------------------------------------
@@ -279,26 +298,48 @@ class FrameProcessor:
     def _extract_and_detect(self, request, ml_info):
         """
         Zero-copy read of lores and main streams.
-        Returns (low_res_gray, ml_train_frame, ml_info, patch_dict).
+        Returns (low_res_gray, ml_train_frame, ml_info, patch_dict, step_timings).
+        Each step is timed individually.
         """
+        # 1. Copy lores grayscale out of DMA buffer
         with MappedArray(request, "lores") as m_low_res:
             low_res_gray = m_low_res.array[:self.low_res_h, :].copy()
 
+        # 2. Create ML training frame (resize)
+        ml_train_start = time.perf_counter_ns()
         ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_NEAREST)
-        self.history_buffer.append(low_res_gray)
+        ml_train_ns = time.perf_counter_ns() - ml_train_start
 
+        # 3. Frame differencing
+        self.history_buffer.append(low_res_gray)
+        diff_start = time.perf_counter_ns()
         motion_info, _ = perform_motion_differencing(
             self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
         )
+        diff_ns = time.perf_counter_ns() - diff_start
+
+        # 4. Bounding box selection (from ML or motion)
+        bbox_start = time.perf_counter_ns()
         # if motion_info:
         #     ml_info = motion_info
+        bbox_ns = time.perf_counter_ns() - bbox_start
 
+        # 5. Extract patches from full-res main stream
+        extract_start = time.perf_counter_ns()
         patch_dict = {}
         if ml_info:
             with MappedArray(request, "main") as m_main:
                 patch_dict = extract_patches_from_mapped(m_main.array, ml_info)
+        extract_ns = time.perf_counter_ns() - extract_start
 
-        return low_res_gray, ml_train_frame, ml_info, patch_dict
+        step_timings = {
+            "ml_train_ns": ml_train_ns,
+            "diff_ns": diff_ns,
+            "bbox_ns": bbox_ns,
+            "extract_ns": extract_ns,
+        }
+
+        return low_res_gray, ml_train_frame, ml_info, patch_dict, step_timings
 
     def _generate_patches_list(self, patch_dict):
         """Generate a list of patches."""
@@ -361,29 +402,3 @@ class FrameProcessor:
 
         return ml_train_tiles, low_res_tiles
 
-    def _maybe_generate_heartbeat(self, shot_id, sensor_ts_ns):
-        """If the heartbeat interval has elapsed, return a Type 3 packet payload and print stats."""
-        now_hb = time.time()
-        if now_hb - self.last_heartbeat_time < self.heartbeat_interval_sec:
-            return None
-
-        elapsed = time.monotonic() - self.fps_window_start
-        current_fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
-        self.fps_window_start = time.monotonic()
-        self.fps_frame_count = 0
-
-        # Send MS is now populated by sender.py into shared_stats
-        send_ms = self.shared_stats.get("send_ms", 0.0)
-
-        print(
-            f"[Camera {self.camera_id} Stats] FPS: {current_fps:.1f} | "
-            f"Q(P/S): {self.processing_queue.qsize()}/{self.send_queue.qsize()} | "
-            f"Latest Send Latency: {send_ms:.1f}ms"
-        )
-
-        self.last_heartbeat_time = now_hb
-        return HEARTBEAT_STRUCT.pack(
-            _read_cpu_temp_c(), _read_mem_used_pct(),
-            self.processing_queue.qsize(), self.send_queue.qsize(),
-            self.frames_processed, current_fps,
-        )
