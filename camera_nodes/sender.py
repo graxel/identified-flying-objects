@@ -15,27 +15,13 @@ import struct
 TELEMETRY_STRUCT = struct.Struct("!7f d 2f 2H")
 
 
-def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
+def net_send_worker(send_queue, send_dest, shared_stats):
     """
     Worker thread that pulls an atomic one_fully_processed_obj from the send_queue.
     It fragments the atomic object into UDP packets and transmits them.
-    Also logs the unified lifecycle timestamps per frame to a local CSV.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     header_struct = struct.Struct("!4sBBHQHHHHHH")
-    
-    # Prepare CSV log file
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"timing_{int(time.time())}.csv")
-    csv_file = open(log_path, "w", newline="")
-    writer = csv.writer(csv_file)
-    writer.writerow([
-        "shot_id", "camera_id", "sensor_ts_ns", 
-        "capture_start_ns", "capture_done_ns", "queue_put_ns",
-        "proc_start_ns", "proc_done_ns", 
-        "send_start_ns", "send_done_ns",
-        "diff_ms", "bbox_ms", "ml_train_ms", "extract_ms", "pack_ms", "send_ms",
-    ])
 
     frames_sent = 0
 
@@ -105,18 +91,8 @@ def net_send_worker(send_queue, send_dest, log_dir, shared_stats):
             # EMA for send latency (shared with processing thread for console log)
             shared_stats["send_ms"] = 0.9 * shared_stats.get("send_ms", send_ms) + 0.1 * send_ms
             
-            # Log local timing CSV
-            writer.writerow([
-                frame_obj["shot_id"], camera_id, sensor_ts_ns,
-                frame_timestamps["capture_start_ns"], frame_timestamps["capture_done_ns"], frame_timestamps["queue_put_ns"],
-                proc_timestamps["proc_start_ns"], proc_timestamps["proc_done_ns"],
-                send_start_ns, send_done_ns,
-                step_ms["diff_ms"], step_ms["bbox_ms"], step_ms["ml_train_ms"], step_ms["extract_ms"], step_ms["pack_ms"], send_ms,
-            ])
             
             frames_sent += 1
-            if frames_sent % 10 == 0:
-                csv_file.flush()
 
         except Exception as e:
             print(f"[warn] UDP send failed for camera {frame_obj.get('camera_id')} "

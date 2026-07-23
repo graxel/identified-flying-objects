@@ -86,7 +86,7 @@ def main():
     # Thread 3: Network sender
     threading.Thread(
         target=net_send_worker,
-        args=(send_queue, SEND_DEST, SEND_LOG_DIR, shared_stats),
+        args=(send_queue, SEND_DEST, shared_stats),
         daemon=True,
     ).start()
 
