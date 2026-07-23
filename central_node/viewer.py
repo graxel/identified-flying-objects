@@ -95,7 +95,7 @@ def main():
     ORIG_W, ORIG_H = 4056, 3040
     CANVAS_W, CANVAS_H = ORIG_W // SCALE, ORIG_H // SCALE
     
-    LOW_RES_W, LOW_RES_H = 640, 480 #800, 600
+    LOW_RES_W, LOW_RES_H = 400, 300 #640, 480 #800, 600
     ML_W, ML_H = 640, 480
 
     STATS_PANEL_W = 280  # Extra width for the stats side panel

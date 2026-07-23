@@ -307,15 +307,16 @@ class FrameProcessor:
 
         # 2. Create ML training frame (resize)
         ml_train_start = time.perf_counter_ns()
-        ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_NEAREST)
+        ml_train_frame = np.full((self.ml_h, self.ml_w), 127, dtype=np.uint8)
+        # ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_NEAREST)
         ml_train_ns = time.perf_counter_ns() - ml_train_start
 
         # 3. Frame differencing
-        self.history_buffer.append(low_res_gray)
+        # self.history_buffer.append(low_res_gray)
         diff_start = time.perf_counter_ns()
-        motion_info, _ = perform_motion_differencing(
-            self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
-        )
+        # motion_info, _ = perform_motion_differencing(
+        #     self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
+        # )
         diff_ns = time.perf_counter_ns() - diff_start
 
         # 4. Bounding box selection (from ML or motion)
