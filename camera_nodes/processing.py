@@ -154,10 +154,6 @@ class FrameProcessor:
         low_res_size,
         camera_id=0,
         ml_size=(640, 480),
-        ml_train_tile_rows=4,
-        ml_train_tile_cols=4,
-        low_res_tile_rows=4,
-        low_res_tile_cols=4,
         ml_train_interval_sec=1.0,
         low_res_interval_sec=1.0,
         heartbeat_interval_sec=5.0,
@@ -180,12 +176,6 @@ class FrameProcessor:
         self.ml_w, self.ml_h = ml_size
         self.scale_x = self.main_w / float(self.low_res_w)
         self.scale_y = self.main_h / float(self.low_res_h)
-
-        # Tile grid shapes (independent per stream)
-        self.ml_train_tile_rows = ml_train_tile_rows
-        self.ml_train_tile_cols = ml_train_tile_cols
-        self.low_res_tile_rows = low_res_tile_rows
-        self.low_res_tile_cols = low_res_tile_cols
 
         # Intervals
         self.ml_train_interval_sec = ml_train_interval_sec
@@ -361,7 +351,7 @@ class FrameProcessor:
 
     def _enqueue_full_frames(self, ml_train_frame, low_res_gray, sensor_ts_ns):
         """
-        If enough time has passed, send the raw full frames to the tile worker.
+        If enough time has passed, send the raw full frames to the frame worker.
         """
         now_sec = time.time()
         
