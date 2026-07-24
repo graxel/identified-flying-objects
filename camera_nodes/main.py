@@ -8,6 +8,7 @@ import socket
 from camera import set_up_camera, camera_worker
 from processing import FrameProcessor
 from sender import net_send_worker
+from frame_encoder import encoder_worker_thread
 
 TIMING_LOG_DIR = "timing_logs"
 SEND_LOG_DIR = "send_logs"
@@ -53,6 +54,7 @@ def main():
 
     processing_queue = queue.Queue(FRAME_QUEUE_MAX)
     send_queue = queue.Queue(SEND_QUEUE_MAX)
+    encoder_queue = queue.Queue(4)
     shared_stats = {"send_ms": 0.0}
 
     # Thread 1: Camera capture
@@ -80,6 +82,7 @@ def main():
         low_res_interval_sec=LOW_RES_INTERVAL_SEC,
         heartbeat_interval_sec=HEARTBEAT_INTERVAL_SEC,
         shared_stats=shared_stats,
+        encoder_queue=encoder_queue,
     )
     threading.Thread(target=processor.run, daemon=True).start()
 
@@ -87,6 +90,13 @@ def main():
     threading.Thread(
         target=net_send_worker,
         args=(send_queue, SEND_DEST, shared_stats),
+        daemon=True,
+    ).start()
+
+    # Thread 4: Frame encoder worker
+    threading.Thread(
+        target=encoder_worker_thread,
+        args=(encoder_queue, send_queue),
         daemon=True,
     ).start()
 

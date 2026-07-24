@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.5.1",
     "opencv-python>=5.0.0.93",
     "python-multipart>=0.0.32",
+    "pyzmq>=27.1.0",
     "requests>=2.34.2",
     "uvicorn>=0.51.0",
 ]

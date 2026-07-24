@@ -11,53 +11,40 @@ import time
 TELEMETRY_STRUCT = struct.Struct("!7f d 2f 2H")
 
 
+import json
+import zmq
+
 def network_worker(sock, data_queue, packet_counts):
     """
-    Dedicated thread to receive UDP packets and push them to a queue.
+    Dedicated thread to receive ZMQ packets and push them to a queue.
     This prevents the UI loop from blocking the network buffer and dropping packets.
     """
-    buffer_size = 65535
-    header_struct = struct.Struct("!4sBBHQHHHHHH")
-    header_size = header_struct.size  # 28 bytes
-
     while True:
         try:
-            data, addr = sock.recvfrom(buffer_size)
-            if len(data) < header_size:
+            parts = sock.recv_multipart()
+            if len(parts) < 3:
                 continue
 
-            (
-                magic,
-                packet_type,
-                padding,
-                camera_id,
-                sensor_ts_ns,
-                patch_id,
-                unused,
-                x,
-                y,
-                w,
-                h,
-            ) = header_struct.unpack(data[:header_size])
+            topic, meta_bytes, px_bytes = parts[0], parts[1], parts[2]
 
-            if magic != b"IFOP":
+            if topic != b"IFOP":
                 continue
+
+            meta = json.loads(meta_bytes.decode('utf-8'))
+            packet_type = meta["packet_type"]
 
             # Forward Patches (Type 0), ML Tiles (Type 1), Low Res Tiles (Type 2), and Telemetry (Type 4)
             if packet_type in (0, 1, 2, 4):
                 data_queue.put({
                     "packet_type": packet_type,
-                    "x": x,
-                    "y": y,
-                    "w": w,
-                    "h": h,
-                    "px_bytes": data[header_size:]
+                    "x": meta["x"],
+                    "y": meta["y"],
+                    "w": meta["w"],
+                    "h": meta["h"],
+                    "px_bytes": px_bytes
                 })
                 packet_counts[packet_type] = packet_counts.get(packet_type, 0) + 1
-        except socket.timeout:
-            continue  # Normal idle, loop and wait for more data
-        except OSError:
-            # Socket was explicitly closed (viewer shutting down)
+        except zmq.ContextTerminated:
             break
         except Exception as e:
             print(f"Network worker error: {e}")
@@ -68,15 +55,13 @@ def main():
     host = "0.0.0.0"
     port = 8000
 
-    # 1. Setup Network Socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind((host, port))
-    sock.settimeout(1.0)  # Allow network thread to wake up and notice if socket is closed
+    # 1. Setup Network Socket (ZeroMQ SUB)
+    context = zmq.Context()
+    sock = context.socket(zmq.SUB)
+    sock.bind(f"tcp://{host}:{port}")
+    sock.setsockopt(zmq.SUBSCRIBE, b"IFOP")
 
-    print(f"UDP Viewer listening on {host}:{port}")
+    print(f"ZeroMQ Viewer listening on tcp://{host}:{port}")
 
     # 2. Setup Threading Queue
     data_queue = queue.Queue(maxsize=2000)
@@ -332,6 +317,7 @@ def main():
         print("\nViewer shutting down.")
     finally:
         sock.close()
+        context.term()
         cv2.destroyAllWindows()
 
 

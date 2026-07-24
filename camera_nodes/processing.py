@@ -8,6 +8,7 @@ import collections
 import random
 import cv2
 import numpy as np
+import queue
 from picamera2 import MappedArray
 
 
@@ -161,10 +162,12 @@ class FrameProcessor:
         low_res_interval_sec=1.0,
         heartbeat_interval_sec=5.0,
         shared_stats=None,
+        encoder_queue=None,
     ):
         # Queues & identity
         self.processing_queue = processing_queue
         self.send_queue = send_queue
+        self.encoder_queue = encoder_queue
         self.camera_id = camera_id
         self.shared_stats = shared_stats or {}
 
@@ -232,7 +235,8 @@ class FrameProcessor:
 
         pack_start_ns = time.perf_counter_ns()
         patches = self._generate_patches_list(patch_dict)
-        ml_train_tiles, low_res_tiles = self._generate_tiles_lists(ml_train_frame, low_res_gray)
+        if self.encoder_queue:
+            self._enqueue_full_frames(ml_train_frame, low_res_gray, sensor_ts_ns)
         pack_done_ns = time.perf_counter_ns()
 
         proc_done_ns = time.perf_counter_ns()
@@ -252,12 +256,11 @@ class FrameProcessor:
         }
 
         one_fully_processed_obj = {
+            "type": "patches",
             "shot_id": shot_id,
             "camera_id": self.camera_id,
             "metadata": capture_obj["metadata"],
             "patches": patches,
-            "ml_train_tiles": ml_train_tiles,
-            "low_res_tiles": low_res_tiles,
             "timestamps": {
                 "capture": frame_timestamps,
                 "processing": proc_timestamps,
@@ -356,50 +359,32 @@ class FrameProcessor:
             })
         return patches
 
-    def _generate_tiles_lists(self, ml_train_frame, low_res_gray):
+    def _enqueue_full_frames(self, ml_train_frame, low_res_gray, sensor_ts_ns):
         """
-        If enough time has passed, generate tile lists.
-        Returns (ml_train_tiles, low_res_tiles).
+        If enough time has passed, send the raw full frames to the tile worker.
         """
         now_sec = time.time()
-        ml_train_tiles = []
-        low_res_tiles = []
+        
+        send_ml = False
+        send_low_res = False
 
         if now_sec - self.last_ml_train_send_time >= self.ml_train_interval_sec:
             self.last_ml_train_send_time = now_sec
-            ml_train_tile_h = self.ml_h // self.ml_train_tile_rows
-            ml_train_tile_w = self.ml_w // self.ml_train_tile_cols
-            tile_id = 0
-            for r in range(self.ml_train_tile_rows):
-                for c in range(self.ml_train_tile_cols):
-                    y0, y1 = r * ml_train_tile_h, (r + 1) * ml_train_tile_h
-                    x0, x1 = c * ml_train_tile_w, (c + 1) * ml_train_tile_w
-                    ml_train_tile = ml_train_frame[y0:y1, x0:x1]
-                    ml_train_tiles.append({
-                        "tile_id": tile_id,
-                        "x": x0, "y": y0, "w": ml_train_tile_w, "h": ml_train_tile_h,
-                        "px": ml_train_tile.tobytes(),
-                    })
-                    tile_id += 1
+            send_ml = True
 
         if now_sec - self.last_low_res_send_time >= self.low_res_interval_sec:
             self.last_low_res_send_time = now_sec
-            low_res_tile_h = self.low_res_h // self.low_res_tile_rows
-            low_res_tile_w = self.low_res_w // self.low_res_tile_cols
-            tile_id = 0
-            for r in range(self.low_res_tile_rows):
-                for c in range(self.low_res_tile_cols):
-                    y0, y1 = r * low_res_tile_h, (r + 1) * low_res_tile_h
-                    x0, x1 = c * low_res_tile_w, (c + 1) * low_res_tile_w
-                    low_res_tile = low_res_gray[y0:y1, x0:x1]
-                    success, jpeg_bytes = cv2.imencode(".jpg", low_res_tile, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    if success:
-                        low_res_tiles.append({
-                            "tile_id": tile_id,
-                            "x": x0, "y": y0, "w": low_res_tile_w, "h": low_res_tile_h,
-                            "px": jpeg_bytes.tobytes(),
-                        })
-                    tile_id += 1
+            send_low_res = True
 
-        return ml_train_tiles, low_res_tiles
+        if send_ml or send_low_res:
+            job = {
+                "camera_id": self.camera_id,
+                "sensor_ts_ns": sensor_ts_ns,
+                "ml_train_frame": ml_train_frame.copy() if send_ml else None,
+                "low_res_gray": low_res_gray.copy() if send_low_res else None,
+            }
+            try:
+                self.encoder_queue.put(job, block=False)
+            except queue.Full:
+                pass # Drop if worker is busy
 
