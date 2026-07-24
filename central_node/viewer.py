@@ -92,7 +92,7 @@ def main():
     # Patches layer (display-resolution)
     patches_bgr = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
     patches_alpha = np.zeros((CANVAS_H, CANVAS_W), dtype=np.float32)
-    fade_factor = 0.999
+    fade_factor = 0.99
 
     # EMA-smoothed telemetry stats
     EMA_ALPHA = 0.15  # Smoothing factor (higher = more responsive, noisier)
