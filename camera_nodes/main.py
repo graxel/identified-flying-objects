@@ -11,7 +11,7 @@ from sender import net_send_worker
 
 TIMING_LOG_DIR = "timing_logs"
 SEND_LOG_DIR = "send_logs"
-SEND_DEST = ("graxel.local", 8000)
+SEND_DEST = ("kalman.local", 8000)
 
 FRAME_QUEUE_MAX = 8
 SEND_QUEUE_MAX = 32
