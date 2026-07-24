@@ -294,9 +294,9 @@ class FrameProcessor:
         Returns (low_res_gray, ml_train_frame, ml_info, patch_dict, step_timings).
         Each step is timed individually.
         """
-        # 1. Copy lores grayscale out of DMA buffer
+        # 1. Copy lores grayscale out of DMA buffer (strip hardware padding)
         with MappedArray(request, "lores") as m_low_res:
-            low_res_gray = m_low_res.array[:self.low_res_h, :].copy()
+            low_res_gray = m_low_res.array[:self.low_res_h, :self.low_res_w].copy()
 
         # 2. Create ML training frame (resize)
         ml_train_start = time.perf_counter_ns()

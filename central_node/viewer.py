@@ -130,10 +130,10 @@ def main():
 
                 if ptype == 0:
                     # Type 0: High-Res Patches (Main camera space: 4056x3040)
-                    disp_x = int(x / SCALE)
-                    disp_y = int(y / SCALE)
-                    disp_x_end = int((x + w) / SCALE)
-                    disp_y_end = int((y + h) / SCALE)
+                    disp_x = int(round(x / SCALE))
+                    disp_y = int(round(y / SCALE))
+                    disp_x_end = int(round((x + w) / SCALE))
+                    disp_y_end = int(round((y + h) / SCALE))
                     disp_w = disp_x_end - disp_x
                     disp_h = disp_y_end - disp_y
 
@@ -165,18 +165,18 @@ def main():
                             ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
 
                 elif ptype == 2:
-                    # Type 2: JPEG Tiles (Low-Res space: 800x600)
-                    tile_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-                    if tile_decoded is not None:
+                    # Type 2: JPEG Frames (Low-Res stream)
+                    frame_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+                    if frame_decoded is not None:
                         # Use the decoded tile's actual shape — JPEG chroma subsampling can round
                         # dimensions differently from the header's w/h, causing shape mismatches.
-                        actual_h, actual_w = tile_decoded.shape[:2]
+                        actual_h, actual_w = frame_decoded.shape[:2]
                         x_end = min(x + actual_w, LOW_RES_W)
                         y_end = min(y + actual_h, LOW_RES_H)
                         vw = x_end - x
                         vh = y_end - y
                         if vw > 0 and vh > 0:
-                            lores_canvas[y:y_end, x:x_end] = tile_decoded[:vh, :vw]
+                            lores_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
 
                 elif ptype == 4:
                     # Type 4: Unified Telemetry
@@ -213,7 +213,7 @@ def main():
             # --- Render Pass ---
 
             # 1. Scale native tile canvases to display resolution (single resize = perfect alignment)
-            lores_display = cv2.resize(lores_canvas, (CANVAS_W, CANVAS_H), interpolation=cv2.INTER_NEAREST)
+            lores_display = cv2.resize(lores_canvas, (CANVAS_W, CANVAS_H), interpolation=cv2.INTER_LINEAR)
             lores_display_bgr = cv2.cvtColor(lores_display, cv2.COLOR_GRAY2BGR)
 
             # Use lores tiles as the base background layer
