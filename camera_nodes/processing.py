@@ -5,13 +5,14 @@ import queue
 import time
 
 import numpy as np
+import cv2
 from picamera2 import MappedArray
 
-from cv_ops import NUM_DIFF_FRAMES, extract_patches_from_mapped, parse_ml_output
+from cv_ops import NUM_DIFF_FRAMES, extract_patches_from_mapped, parse_ml_output, perform_motion_differencing
 from system_utils import read_cpu_temp_c, read_mem_used_pct, try_pin_and_prioritize
 
 
-CONSOLE_LOG_INTERVAL = 50  # Print stats every N frames
+CONSOLE_LOG_INTERVAL = 10  # Print stats every N frames
 
 
 class FrameProcessor:
@@ -179,20 +180,20 @@ class FrameProcessor:
             low_res_gray = m_low_res.array[:self.low_res_h, :self.low_res_w].copy()
 
         ml_train_start = time.perf_counter_ns()
-        ml_train_frame = np.full((self.ml_h, self.ml_w), 127, dtype=np.uint8)
-        # ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_NEAREST) ####
+        # ml_train_frame = np.full((self.ml_h, self.ml_w), 127, dtype=np.uint8)
+        ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_AREA) ####
         ml_train_ns = time.perf_counter_ns() - ml_train_start
 
         diff_start = time.perf_counter_ns()
-        # self.history_buffer.append(low_res_gray) #######
-        # motion_info, _ = perform_motion_differencing(
-        #     self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
-        # )
+        self.history_buffer.append(low_res_gray) #######
+        motion_info, _ = perform_motion_differencing(
+            self.history_buffer, self.scale_x, self.scale_y, self.main_w, self.main_h
+        )
         diff_ns = time.perf_counter_ns() - diff_start
 
         bbox_start = time.perf_counter_ns()
-        # if motion_info: ##########
-        #     ml_info = motion_info
+        if motion_info: ##########
+            ml_info = motion_info
         bbox_ns = time.perf_counter_ns() - bbox_start
 
         extract_start = time.perf_counter_ns()
