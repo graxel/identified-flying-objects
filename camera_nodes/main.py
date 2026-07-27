@@ -1,20 +1,19 @@
-import os
-import time
 import gc
-import threading
+import os
 import queue
 import socket
+import threading
+import time
 
-from camera import set_up_camera, camera_worker
+from camera import set_up_camera
+from frame_encoder import encoder_worker_thread
 from processing import FrameProcessor
 from sender import net_send_worker
-from frame_encoder import encoder_worker_thread
 
 TIMING_LOG_DIR = "timing_logs"
 SEND_LOG_DIR = "send_logs"
 SEND_DEST = ("kalman.local", 8000)
 
-FRAME_QUEUE_MAX = 8
 SEND_QUEUE_MAX = 32
 
 MAIN_SIZE = (4056, 3040)
@@ -29,7 +28,7 @@ def setup():
     """Perform file system setup, disable GC, and resolve local camera ID."""
     os.makedirs(TIMING_LOG_DIR, exist_ok=True)
     os.makedirs(SEND_LOG_DIR, exist_ok=True)
-    
+
     gc.disable()
 
     hostname = socket.gethostname()
@@ -48,22 +47,12 @@ def main():
 
     picam2 = set_up_camera(main_size=MAIN_SIZE, low_res_size=LOW_RES_SIZE)
 
-    processing_queue = queue.Queue(FRAME_QUEUE_MAX)
     send_queue = queue.Queue(SEND_QUEUE_MAX)
     encoder_queue = queue.Queue(4)
     shared_stats = {"send_ms": 0.0}
 
-    # Thread 1: Camera capture
-    threading.Thread(
-        target=camera_worker,
-        args=(picam2, processing_queue),
-        kwargs={"core_id": 1, "realtime_priority": None},
-        daemon=True,
-    ).start()
-
-    # Thread 2: Frame processor
     processor = FrameProcessor(
-        processing_queue=processing_queue,
+        picam2=picam2,
         send_queue=send_queue,
         timing_csv_path=timing_csv_path,
         main_size=MAIN_SIZE,
@@ -75,17 +64,18 @@ def main():
         heartbeat_interval_sec=HEARTBEAT_INTERVAL_SEC,
         shared_stats=shared_stats,
         encoder_queue=encoder_queue,
+        core_id=1,
+        realtime_priority=None,
     )
+
     threading.Thread(target=processor.run, daemon=True).start()
 
-    # Thread 3: Network sender
     threading.Thread(
         target=net_send_worker,
         args=(send_queue, SEND_DEST, shared_stats),
         daemon=True,
     ).start()
 
-    # Thread 4: Frame encoder worker
     threading.Thread(
         target=encoder_worker_thread,
         args=(encoder_queue, send_queue),
