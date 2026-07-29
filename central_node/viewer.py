@@ -9,7 +9,14 @@ import time
 
 # Telemetry struct matching sender.py
 TELEMETRY_STRUCT = struct.Struct("!7f d 2f 2H")
+SCALE = 4
+ORIG_W, ORIG_H = 4056, 3040
+CANVAS_W, CANVAS_H = ORIG_W // SCALE, ORIG_H // SCALE
 
+LOW_RES_W, LOW_RES_H = 800, 600
+ML_W, ML_H = 640, 480
+
+STATS_PANEL_W = 280  # Extra width for the stats side panel
 
 import json
 import zmq
@@ -76,14 +83,7 @@ def main():
     net_thread.start()
 
     # 4. Resolutions
-    SCALE = 4
-    ORIG_W, ORIG_H = 4056, 3040
-    CANVAS_W, CANVAS_H = ORIG_W // SCALE, ORIG_H // SCALE
-    
-    LOW_RES_W, LOW_RES_H = 1600, 1200
-    ML_W, ML_H = 640, 480
 
-    STATS_PANEL_W = 280  # Extra width for the stats side panel
 
     # 5. Native-resolution tile canvases (avoids per-tile resize interpolation seams)
     ml_canvas = np.zeros((ML_H, ML_W), dtype=np.uint8)       # Grayscale

@@ -65,15 +65,15 @@ class PostProcessor:
                     # Encoding these as well when we send low_res
                     slow_diff_jpg = encode_img(frame_data.get("slow_diff"))
                     fast_diff_jpg = encode_img(frame_data.get("fast_diff"))
-                    slow_bg_jpg = encode_img(frame_data.get("slow_bg"))
-                    fast_bg_jpg = encode_img(frame_data.get("fast_bg"))
+                    # slow_bg_jpg = encode_img(frame_data.get("slow_bg"))
+                    # fast_bg_jpg = encode_img(frame_data.get("fast_bg"))
                 else:
                     low_res_shape = None
                     low_res_jpg = None
                     slow_diff_jpg = None
                     fast_diff_jpg = None
-                    slow_bg_jpg = None
-                    fast_bg_jpg = None
+                    # slow_bg_jpg = None
+                    # fast_bg_jpg = None
                 
                 # 3. use camera calibration to convert patch coords to 3D ray
                 patches = frame_data["patches"]
@@ -124,8 +124,8 @@ class PostProcessor:
                         "low_res_shape": low_res_shape,
                         "slow_diff": slow_diff_jpg,
                         "fast_diff": fast_diff_jpg,
-                        "slow_bg": slow_bg_jpg,
-                        "fast_bg": fast_bg_jpg,
+                        # "slow_bg": slow_bg_jpg,
+                        # "fast_bg": fast_bg_jpg,
                     }
                     try:
                         self.send_queue.put(send_frames_obj, block=False)
