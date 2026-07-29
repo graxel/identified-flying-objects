@@ -30,7 +30,7 @@ class PostProcessor:
                 
                 # Check intervals
                 send_ml = False #(now_sec - self.last_ml_train_send_time) >= self.ml_train_interval_sec
-                send_low_res = (now_sec - self.last_low_res_send_time) >= self.low_res_interval_sec
+                send_low_res = True #(now_sec - self.last_low_res_send_time) >= self.low_res_interval_sec
                 
                 # 1. [low_res => ml_train]
                 low_res_gray = frame_data["low_res_gray"]
