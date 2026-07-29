@@ -127,7 +127,7 @@ class FrameIngester:
             preproc_start_ns = time.perf_counter_ns()
 
             # 2. AI output => AI boxes
-            ai_boxes = parse_ml_output(metadata, self.main_size, self.low_res_size)  # TODO: real model
+            # ai_boxes = parse_ml_output(metadata, self.main_size, self.low_res_size)  # TODO: real model
 
             # 3. low_res => diffs
             with MappedArray(camera_mem, "lores") as m_low_res:
@@ -138,15 +138,15 @@ class FrameIngester:
             )
 
             # 4. diffs => motion boxes
-            if slow_diff is not None:
-                motion_boxes = process_motion_diffs(slow_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
+            if slow_diff is not None and fast_diff is not None:
+                motion_boxes = process_motion_diffs(slow_diff, fast_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
             else:
                 motion_boxes = {}
 
             # 5. AI boxes and motion boxes => patches
             all_boxes = {}
-            for k, v in ai_boxes.items():
-                all_boxes[f"ai_{k}"] = v
+            # for k, v in ai_boxes.items():
+            #     all_boxes[f"ai_{k}"] = v
             for k, v in motion_boxes.items():
                 all_boxes[f"mo_{k}"] = v
 
@@ -180,8 +180,8 @@ class FrameIngester:
                 "low_res_gray": low_res_gray,
                 "slow_diff": slow_diff,
                 "fast_diff": fast_diff,
-                "slow_bg": self.slow_bg.copy() if self.slow_bg is not None else None,
-                "fast_bg": self.fast_bg.copy() if self.fast_bg is not None else None,
+                # "slow_bg": self.slow_bg.copy() if self.slow_bg is not None else None,
+                # "fast_bg": self.fast_bg.copy() if self.fast_bg is not None else None,
                 "patches": patches,
             }
 
@@ -189,6 +189,7 @@ class FrameIngester:
             try:
                 self.postproc_queue.put(preprocessed_frame, block=False)
             except queue.Full:
+                print("postproc_queue is full!")
                 pass
 
             self.frames_processed += 1

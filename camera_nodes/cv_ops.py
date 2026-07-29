@@ -58,23 +58,42 @@ def compute_ema_diff(frame, bg, alpha):
     return diff, bg
 
 
-def process_motion_diffs(diff, scale_x, scale_y, main_w, main_h):
+MAX_CLOUD_FRACTION = 0.15  # reject blobs covering more than 15% of the frame
+MIN_EDGE_DENSITY = 5.0     # reject blobs with weak internal edges (cloud-like)
+
+
+def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h):
     """
-    Threshold, clean, and extract bounding boxes from the difference image.
-    Returns bounding boxes mapped to the main coordinate space.
+    Combine slow and fast difference images, threshold, clean, filter, and
+    extract bounding boxes mapped to the main coordinate space.
+
+    Pipeline:
+      1. Threshold both diffs independently.
+      2. AND the masks — keeps only regions that differ from both backgrounds.
+      3. Morphological cleanup (open to remove speckle, close to fill holes).
+      4. Connected components -> filter by area, cloud fraction, and edge density.
+      5. Map surviving blobs to main-resolution bounding boxes.
     """
-    _, thresh = cv2.threshold(diff, DIFF_THRESH, 255, cv2.THRESH_BINARY)
+    # Threshold both diffs
+    _, slow_mask = cv2.threshold(slow_diff, DIFF_THRESH, 255, cv2.THRESH_BINARY)
+    _, fast_mask = cv2.threshold(fast_diff, DIFF_THRESH, 255, cv2.THRESH_BINARY)
+
+    # AND: keep only regions that differ from both backgrounds.
+    # Clouds drift into slow_bg but stay in fast_bg, so they only trigger one mask.
+    candidate_mask = cv2.bitwise_and(slow_mask, fast_mask)
 
     # Morphology cleanup
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(candidate_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Pre-compute the max low_res box that maps to <= 140px in main space
+    # Pre-compute limits
     max_low_res_w = int(140 / scale_x) if scale_x != 0 else 140
     max_low_res_h = int(140 / scale_y) if scale_y != 0 else 140
+    frame_h, frame_w = slow_diff.shape[:2]
+    full_frame_area = frame_h * frame_w
 
     ml_info = {}
     idx = 0
@@ -84,6 +103,17 @@ def process_motion_diffs(diff, scale_x, scale_y, main_w, main_h):
             continue
 
         x, y, w, h = cv2.boundingRect(contour)
+
+        # Cloud fraction filter: reject blobs covering too much of the frame
+        if area / full_frame_area > MAX_CLOUD_FRACTION:
+            continue
+
+        # Edge-density filter: reject soft, amorphous blobs (clouds)
+        roi = slow_diff[y:y + h, x:x + w]
+        edges = cv2.Sobel(roi, cv2.CV_64F, 1, 1, ksize=3)
+        edge_density = np.mean(np.abs(edges))
+        if edge_density < MIN_EDGE_DENSITY:
+            continue
 
         # Drop anything that would produce a patch larger than 140x140 in main space
         if w > max_low_res_w or h > max_low_res_h:
