@@ -50,6 +50,8 @@ class PostProcessor:
                 def encode_img(img):
                     if img is None:
                         return None
+                    if img.dtype != np.uint8:
+                        img = cv2.convertScaleAbs(img)
                     success, b = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     return b.tobytes() if success else None
 

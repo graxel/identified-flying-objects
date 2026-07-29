@@ -100,8 +100,7 @@ class FrameIngester:
         camera_mem = self.picam2.capture_request()
         metadata = camera_mem.get_metadata()
         capture_done_ns = time.perf_counter_ns()
-        capture_time_ns = capture_done_ns - capture_start_ns
-        return camera_mem, metadata, capture_time_ns
+        return camera_mem, metadata, capture_start_ns, capture_done_ns
 
     def get_frame_timestamps(self, metadata):
         sensor_monotonic_ns = metadata.get("SensorTimestamp")
@@ -124,7 +123,7 @@ class FrameIngester:
 
         while True:
             # 1. Camera capture
-            camera_mem, metadata, capture_time_ns = self.get_next_capture()
+            camera_mem, metadata, capture_start_ns, capture_done_ns = self.get_next_capture()
             preproc_start_ns = time.perf_counter_ns()
 
             # 2. AI output => AI boxes
@@ -140,7 +139,7 @@ class FrameIngester:
 
             # 4. diffs => motion boxes
             if slow_diff is not None:
-                motion_boxes = process_motion_diffs(slow_diff, fast_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
+                motion_boxes = process_motion_diffs(slow_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
             else:
                 motion_boxes = {}
 
@@ -163,7 +162,8 @@ class FrameIngester:
 
             # 7. Timing stuff
             frame_timestamps = self.get_frame_timestamps(metadata)
-            frame_timestamps['capture_time_ns'] = capture_time_ns
+            frame_timestamps['capture_start_ns'] = capture_start_ns
+            frame_timestamps['capture_done_ns'] = capture_done_ns
             shot_id = f"frame_{self.shot_num:06d}"
 
             # 8. Pack patches, low_res, and timing data ++and diffs and bgs++ into a preprocessed_frame dict
