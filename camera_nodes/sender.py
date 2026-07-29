@@ -116,6 +116,26 @@ def net_send_worker(send_queue, send_dest, shared_stats):
                     meta_bytes = json.dumps(meta).encode("utf-8")
                     sock.send_multipart([b"IFOP", meta_bytes, frame_obj["low_res_full"]])
 
+                if frame_obj.get("slow_diff_full"):
+                    h, w = frame_obj["low_res_shape"][:2]
+                    meta = {"packet_type": 5, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                    sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["slow_diff_full"]])
+
+                if frame_obj.get("fast_diff_full"):
+                    h, w = frame_obj["low_res_shape"][:2]
+                    meta = {"packet_type": 6, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                    sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["fast_diff_full"]])
+
+                if frame_obj.get("slow_bg_full"):
+                    h, w = frame_obj["low_res_shape"][:2]
+                    meta = {"packet_type": 7, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                    sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["slow_bg_full"]])
+
+                if frame_obj.get("fast_bg_full"):
+                    h, w = frame_obj["low_res_shape"][:2]
+                    meta = {"packet_type": 8, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                    sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["fast_bg_full"]])
+
         except Exception as e:
             print(f"[warn] ZMQ send failed for camera {frame_obj.get('camera_id')}: {e}")
         finally:

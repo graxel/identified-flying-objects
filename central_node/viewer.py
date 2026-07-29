@@ -33,8 +33,8 @@ def network_worker(sock, data_queue, packet_counts):
             meta = json.loads(meta_bytes.decode('utf-8'))
             packet_type = meta["packet_type"]
 
-            # Forward Patches (Type 0), ML Tiles (Type 1), Low Res Tiles (Type 2), and Telemetry (Type 4)
-            if packet_type in (0, 1, 2, 4):
+            # Forward Patches (Type 0), ML Tiles (Type 1), Low Res Tiles (Type 2), Telemetry (Type 4), Diffs and BGs (Types 5-8)
+            if packet_type in (0, 1, 2, 4, 5, 6, 7, 8):
                 data_queue.put({
                     "packet_type": packet_type,
                     "x": meta["x"],
@@ -88,6 +88,10 @@ def main():
     # 5. Native-resolution tile canvases (avoids per-tile resize interpolation seams)
     ml_canvas = np.zeros((ML_H, ML_W), dtype=np.uint8)       # Grayscale
     lores_canvas = np.zeros((LOW_RES_H, LOW_RES_W), dtype=np.uint8)  # Grayscale (JPEG decoded to gray)
+    slow_diff_canvas = np.zeros((LOW_RES_H, LOW_RES_W), dtype=np.uint8)
+    fast_diff_canvas = np.zeros((LOW_RES_H, LOW_RES_W), dtype=np.uint8)
+    slow_bg_canvas = np.zeros((LOW_RES_H, LOW_RES_W), dtype=np.uint8)
+    fast_bg_canvas = np.zeros((LOW_RES_H, LOW_RES_W), dtype=np.uint8)
 
     # Patches layer (display-resolution)
     patches_bgr = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
@@ -164,19 +168,26 @@ def main():
                         if vw > 0 and vh > 0:
                             ml_canvas[y:y_end, x:x_end] = tile_gray[:vh, :vw]
 
-                elif ptype == 2:
-                    # Type 2: JPEG Frames (Low-Res stream)
+                elif ptype in (2, 5, 6, 7, 8):
+                    # Type 2, 5, 6, 7, 8: JPEG Frames (Low-Res, diffs, bgs)
                     frame_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
                     if frame_decoded is not None:
-                        # Use the decoded tile's actual shape — JPEG chroma subsampling can round
-                        # dimensions differently from the header's w/h, causing shape mismatches.
                         actual_h, actual_w = frame_decoded.shape[:2]
                         x_end = min(x + actual_w, LOW_RES_W)
                         y_end = min(y + actual_h, LOW_RES_H)
                         vw = x_end - x
                         vh = y_end - y
                         if vw > 0 and vh > 0:
-                            lores_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
+                            if ptype == 2:
+                                lores_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
+                            elif ptype == 5:
+                                slow_diff_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
+                            elif ptype == 6:
+                                fast_diff_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
+                            elif ptype == 7:
+                                slow_bg_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
+                            elif ptype == 8:
+                                fast_bg_canvas[y:y_end, x:x_end] = frame_decoded[:vh, :vw]
 
                 elif ptype == 4:
                     # Type 4: Unified Telemetry
@@ -294,17 +305,45 @@ def main():
 
             pkt_labels = [
                 ("Patches (T0)", packet_counts.get(0, 0)),
-                ("ML Tiles (T1)", packet_counts.get(1, 0)),
                 ("LoRes Tiles (T2)", packet_counts.get(2, 0)),
                 ("Telemetry (T4)", packet_counts.get(4, 0)),
+                ("Diffs/BGs", sum([packet_counts.get(t, 0) for t in (5,6,7,8)])),
             ]
             for label, count in pkt_labels:
                 cv2.putText(stats_panel, label, (x_label, y), font, font_scale, color_label, 1)
                 cv2.putText(stats_panel, str(count), (x_value, y), font, font_scale, color_value, 1)
                 y += line_height
 
-            # 5. Concatenate video + stats panel horizontally
-            final_render = np.hstack([video_panel, stats_panel])
+            # 5. Build Video Grid
+            disp_w = CANVAS_W // 2
+            disp_h = CANVAS_H // 2
+
+            def make_panel(canvas, title):
+                disp = cv2.resize(canvas, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
+                if len(disp.shape) == 2:
+                    disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
+                cv2.putText(disp, title, (10, 20), font, 0.5, (0, 255, 0), 1)
+                return disp
+
+            main_panel = cv2.resize(video_panel, (disp_w, disp_h))
+            cv2.putText(main_panel, "Low Res + Patches", (10, 20), font, 0.5, (0, 255, 0), 1)
+
+            sd_panel = make_panel(slow_diff_canvas, "Slow Diff")
+            fd_panel = make_panel(fast_diff_canvas, "Fast Diff")
+            sb_panel = make_panel(slow_bg_canvas, "Slow BG")
+            fb_panel = make_panel(fast_bg_canvas, "Fast BG")
+            
+            empty_panel = np.zeros((disp_h, disp_w, 3), dtype=np.uint8)
+            row1 = np.hstack([main_panel, sd_panel, fd_panel])
+            row2 = np.hstack([empty_panel, sb_panel, fb_panel])
+            video_grid = np.vstack([row1, row2])
+            
+            # Ensure heights match exactly (in case CANVAS_H is odd)
+            if video_grid.shape[0] != CANVAS_H:
+                video_grid = cv2.resize(video_grid, (video_grid.shape[1], CANVAS_H))
+
+            # 6. Concatenate video + stats panel horizontally
+            final_render = np.hstack([video_grid, stats_panel])
 
             # 6. Display
             cv2.imshow("Live Dual-Layer Stream", final_render)

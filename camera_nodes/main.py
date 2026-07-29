@@ -5,9 +5,8 @@ import socket
 import threading
 import time
 
-from camera import set_up_camera
-from frame_encoder import encoder_worker_thread
-from processing import FrameProcessor
+from camera import set_up_camera, FrameIngester
+from processor2 import PostProcessor
 from sender import net_send_worker
 
 TIMING_LOG_DIR = "timing_logs"
@@ -48,37 +47,36 @@ def main():
     picam2 = set_up_camera(main_size=MAIN_SIZE, low_res_size=LOW_RES_SIZE)
 
     send_queue = queue.Queue(SEND_QUEUE_MAX)
-    encoder_queue = queue.Queue(4)
+    postproc_queue = queue.Queue(16)
     shared_stats = {"send_ms": 0.0}
 
-    processor = FrameProcessor(
+    ingester = FrameIngester(
         picam2=picam2,
-        send_queue=send_queue,
-        timing_csv_path=timing_csv_path,
+        postproc_queue=postproc_queue,
         main_size=MAIN_SIZE,
         low_res_size=LOW_RES_SIZE,
         camera_id=camera_id,
-        ml_size=ML_SIZE,
-        ml_train_interval_sec=ML_TRAIN_INTERVAL_SEC,
-        low_res_interval_sec=LOW_RES_INTERVAL_SEC,
-        heartbeat_interval_sec=HEARTBEAT_INTERVAL_SEC,
-        shared_stats=shared_stats,
-        encoder_queue=encoder_queue,
         core_id=1,
         realtime_priority=None,
     )
 
-    threading.Thread(target=processor.run, daemon=True).start()
+    post_processor = PostProcessor(
+        postproc_queue=postproc_queue,
+        send_queue=send_queue,
+        shared_stats=shared_stats,
+        camera_id=camera_id,
+        ml_size=ML_SIZE,
+        ml_train_interval_sec=ML_TRAIN_INTERVAL_SEC,
+        low_res_interval_sec=LOW_RES_INTERVAL_SEC,
+    )
+
+    threading.Thread(target=ingester.run, daemon=True).start()
+    
+    threading.Thread(target=post_processor.run, daemon=True).start()
 
     threading.Thread(
         target=net_send_worker,
         args=(send_queue, SEND_DEST, shared_stats),
-        daemon=True,
-    ).start()
-
-    threading.Thread(
-        target=encoder_worker_thread,
-        args=(encoder_queue, send_queue),
         daemon=True,
     ).start()
 
