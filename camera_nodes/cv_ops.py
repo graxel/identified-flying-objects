@@ -26,7 +26,7 @@ def parse_ml_output(metadata, main_size, low_res_size):
         x = random.randint(0, main_w - size)
         y = random.randint(0, main_h - size)
         ml_info[i] = {"x": x, "y": y, "w": size, "h": size}
-    print([patch['w'] for patch in ml_info.values()])
+    # print([patch['w'] for patch in ml_info.values()])
     return ml_info
 
 
