@@ -30,7 +30,8 @@ class PostProcessor:
                 
                 # Check intervals
                 send_ml = False # never send (for testing) #(now_sec - self.last_ml_train_send_time) >= self.ml_train_interval_sec
-                send_low_res = True # always send (for testing) but maybe this broke something #(now_sec - self.last_low_res_send_time) >= self.low_res_interval_sec
+                send_low_res = (now_sec - self.last_low_res_send_time) >= self.low_res_interval_sec
+                # True # always send (for testing) but maybe this broke something #
                 
                 # 1. [low_res => ml_train]
                 low_res_gray = frame_data["low_res_gray"]
@@ -129,6 +130,7 @@ class PostProcessor:
                     try:
                         self.send_queue.put(send_frames_obj, block=False)
                     except queue.Full:
+                        print("send_queue is full!")
                         pass
 
             except Exception as e:
