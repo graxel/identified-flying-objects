@@ -8,7 +8,7 @@ import numpy as np
 
 ALPHA_SLOW = 0.02
 ALPHA_FAST = 0.2
-DIFF_THRESH = 25
+DIFF_THRESH = 20
 MIN_AREA = 20
 MAX_AREA = 5000
 
@@ -59,7 +59,6 @@ def compute_ema_diff(frame, bg, alpha):
 
 
 MAX_CLOUD_FRACTION = 0.15  # reject blobs covering more than 15% of the frame
-MIN_EDGE_DENSITY = 5.0     # reject blobs with weak internal edges (cloud-like)
 
 
 def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h):
@@ -71,7 +70,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h)
       1. Threshold both diffs independently.
       2. AND the masks — keeps only regions that differ from both backgrounds.
       3. Morphological cleanup (open to remove speckle, close to fill holes).
-      4. Connected components -> filter by area, cloud fraction, and edge density.
+      4. Connected components -> filter by area and cloud fraction.
       5. Map surviving blobs to main-resolution bounding boxes.
     """
     # Threshold both diffs
@@ -106,13 +105,6 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h)
 
         # Cloud fraction filter: reject blobs covering too much of the frame
         if area / full_frame_area > MAX_CLOUD_FRACTION:
-            continue
-
-        # Edge-density filter: reject soft, amorphous blobs (clouds)
-        roi = slow_diff[y:y + h, x:x + w]
-        edges = cv2.Sobel(roi, cv2.CV_64F, 1, 1, ksize=3)
-        edge_density = np.mean(np.abs(edges))
-        if edge_density < MIN_EDGE_DENSITY:
             continue
 
         # Drop anything that would produce a patch larger than 140x140 in main space
