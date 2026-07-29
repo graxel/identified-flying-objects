@@ -1,6 +1,7 @@
 import time
 import queue
 import cv2
+import np
 
 from system_utils import read_cpu_temp_c, read_mem_used_pct
 
