@@ -26,7 +26,7 @@ Flash the SD card using **Raspberry Pi Imager**:
 Insert the flashed SD card into the Raspberry Pi Zero 2W and power it on. Once it joins the local network, run the provisioning script from your laptop:
 
 ```bash
-ssh -tt camera_node_username@camera_node_hostname.local 'bash -s' < camera_nodes/deployment/set-up-camera-node.sh
+ssh camera_node_username@camera_node_hostname.local 'bash -s' < camera_nodes/deployment/set-up-camera-node.sh
 ```
 
 *Replace `camera_node_username` and `camera_node_hostname` with your respective node username and hostname.*
@@ -42,7 +42,10 @@ ssh -tt camera_node_username@camera_node_hostname.local 'bash -s' < camera_nodes
    * Symlinks to `/etc/systemd/system/camera.service`.
    * Grants passwordless `sudo` rights for service restarts in `/etc/sudoers.d/camera-deploy`.
    * Enables and starts `camera.service` immediately (`systemctl enable --now camera.service`).
-7. **Avahi configuration:** Sets `use-ipv6=no` and `use-ipv4=yes` in `/etc/avahi/avahi-daemon.conf` and restarts Avahi to avoid IPv6 mDNS issues.
+7. **Camera hardware check:**
+   * Runs `rpicam-hello --list-cameras` and prints the output to the console.
+   * If no camera is detected, prints a warning message to the console.
+8. **Avahi configuration:** Sets `use-ipv6=no` and `use-ipv4=yes` in `/etc/avahi/avahi-daemon.conf` and restarts Avahi to avoid IPv6 mDNS issues.
 
 
 ## 3. Post-Boot Behavior & Service Operations
@@ -87,5 +90,5 @@ ssh node_user@cam3.local 'bash -s -- dev' < camera_nodes/deployment/update-camer
 If you need to completely re-provision the camera node, re-run `set-up-camera-node.sh`:
 
 ```bash
-ssh -tt node_user@cam3.local 'bash -s' < camera_nodes/deployment/set-up-camera-node.sh
+ssh node_user@cam3.local 'bash -s' < camera_nodes/deployment/set-up-camera-node.sh
 ```

@@ -12,8 +12,20 @@ from system_utils import try_pin_and_prioritize
 CONSOLE_LOG_INTERVAL = 10
 
 
-def set_up_camera(main_size, low_res_size):
-    picam2 = Picamera2()
+def set_up_camera(main_size, low_res_size, max_retries=5, retry_delay=5):
+    picam2 = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            picam2 = Picamera2()
+            break
+        except RuntimeError as e:
+            if "No camera" in str(e):
+                print(f"[Attempt {attempt}/{max_retries}] No camera detected. Check CSI ribbon cable. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                raise
+    if picam2 is None:
+        raise RuntimeError("No camera detected after retries. Check CSI cable connection.")
 
     # Configure dual streams via Broadcom hardware ISP
     # Main: Uncompressed 12MP RGB

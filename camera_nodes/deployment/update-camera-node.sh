@@ -6,7 +6,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 GITHUB_REPO_CLONE_LINK="https://github.com/graxel/identified-flying-objects.git"
 REPO_NAME="identified-flying-objects"
-SERVICE_TEMPLATE_PATH="${HOME}/${REPO_NAME}/camera_nodes/deployment/services/camera.service"
+SERVICE_TEMPLATE_PATH="${HOME}/${REPO_NAME}/camera_nodes/deployment/camera.service"
 NODE_HOSTNAME="$(hostname)"
 SERVICES_DIR="${HOME}/services"
 SERVICE_FILE="camera.service"
@@ -52,7 +52,11 @@ fi
 # Sync uv
 # ---------------------------------------------------------------------------
 cd "${HOME}/${REPO_NAME}/camera_nodes"
-echo "Syncing virtual environment with system site-packages..."
+echo "Verifying and syncing virtual environment with system site-packages..."
+if [[ ! -f ".venv/bin/python3" ]] || ! .venv/bin/python3 -c "import picamera2" 2>/dev/null; then
+    echo "Creating virtual environment with --system-site-packages..."
+    "${UV_BIN}" venv --system-site-packages --clear
+fi
 "${UV_BIN}" sync
 
 # ---------------------------------------------------------------------------

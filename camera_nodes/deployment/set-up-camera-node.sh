@@ -6,17 +6,21 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 GITHUB_REPO_CLONE_LINK="https://github.com/graxel/identified-flying-objects.git"
 REPO_NAME="identified-flying-objects"
-SERVICE_TEMPLATE_PATH="${HOME}/${REPO_NAME}/camera_nodes/deployment/services/camera.service"
+SERVICE_TEMPLATE_PATH="${HOME}/${REPO_NAME}/camera_nodes/deployment/camera.service"
 NODE_HOSTNAME="$(hostname)"
 SERVICES_DIR="${HOME}/services"
 SERVICE_FILE="camera.service"
 UV_BIN="${HOME}/.local/bin/uv"
+TARGET_BRANCH="${1:-}"
 
 GIT_USER_NAME="Camera Node (${NODE_HOSTNAME})"
-GIT_USER_EMAIL="camera-node@graxel.local"
+GIT_USER_EMAIL="${NODE_HOSTNAME}@ifo.project"
 
 echo "======================================================================"
 echo "Starting provisioning for node: ${NODE_HOSTNAME}"
+if [[ -n "${TARGET_BRANCH}" ]]; then
+    echo "Target branch: ${TARGET_BRANCH}"
+fi
 echo "======================================================================"
 
 # ---------------------------------------------------------------------------
@@ -63,19 +67,35 @@ git --version
 # ---------------------------------------------------------------------------
 cd "${HOME}"
 if [[ ! -d "${REPO_NAME}/.git" ]]; then
-    echo "Cloning repository..."
-    git clone "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    if [[ -n "${TARGET_BRANCH}" ]]; then
+        echo "Cloning repository (branch: ${TARGET_BRANCH})..."
+        git clone -b "${TARGET_BRANCH}" "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    else
+        echo "Cloning repository..."
+        git clone "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    fi
 else
-    echo "Repository already exists, pulling latest changes..."
-    git -C "${REPO_NAME}" pull
+    cd "${REPO_NAME}"
+    git fetch origin
+    if [[ -n "${TARGET_BRANCH}" ]]; then
+        echo "Checking out branch: ${TARGET_BRANCH}..."
+        git checkout "${TARGET_BRANCH}"
+        git pull origin "${TARGET_BRANCH}"
+    else
+        echo "Pulling latest changes on current branch ($(git branch --show-current))..."
+        git pull
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # Sync uv
 # ---------------------------------------------------------------------------
 cd "${HOME}/${REPO_NAME}/camera_nodes"
-echo "Creating/syncing virtual environment with system site-packages..."
-"${UV_BIN}" venv --system-site-packages
+echo "Verifying and syncing virtual environment with system site-packages..."
+if [[ ! -f ".venv/bin/python3" ]] || ! .venv/bin/python3 -c "import picamera2" 2>/dev/null; then
+    echo "Creating virtual environment with --system-site-packages..."
+    "${UV_BIN}" venv --system-site-packages --clear
+fi
 "${UV_BIN}" sync
 
 # ---------------------------------------------------------------------------
@@ -102,6 +122,16 @@ echo "$(id -un) ALL=(ALL) NOPASSWD: /bin/systemctl restart camera.service, /bin/
 sudo chmod 0440 /etc/sudoers.d/camera-deploy
 
 sudo systemctl daemon-reload
+# ---------------------------------------------------------------------------
+# Camera hardware check
+# ---------------------------------------------------------------------------
+echo "Checking connected camera hardware..."
+if rpicam-hello --list-cameras 2>&1 | grep -q "Available cameras"; then
+    echo "Camera detected successfully!"
+else
+    echo "WARNING: No camera detected! Check the CSI ribbon cable connection." >&2
+fi
+
 echo "Enabling and starting ${SERVICE_FILE}..."
 sudo systemctl enable --now "${SERVICE_FILE}"
 
