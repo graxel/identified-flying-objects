@@ -59,9 +59,9 @@ ssh camera_node_username@camera_node_hostname.local 'bash -s' < camera_nodes/dep
 ```
 
 ### What `validate-camera-node.sh` Checks:
-1. **Camera Hardware Probe:** Runs `rpicam-hello --list-cameras` to confirm the IMX500 sensor is recognized on the CSI bus.
-2. **Service Status:** Confirms `camera.service` is active and running (`systemctl is-active`).
-3. **Log Dump:** Dumps the latest journal logs from `camera.service` to verify frame capture has begun without errors.
+1. **Service Status:** Confirms `camera.service` is active and running (`systemctl is-active`). If running, this confirms the camera hardware is acquired and actively capturing.
+2. **Hardware Diagnostic (fallback):** If the service is NOT active, runs `rpicam-hello --list-cameras` to determine whether the issue is hardware (ribbon disconnected) or software (Python crash).
+3. **Log Dump:** Dumps the latest journal logs from `camera.service` to verify frame capture performance and telemetry.
 
 
 ## 4. Useful Service Operations
