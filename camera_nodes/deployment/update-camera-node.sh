@@ -11,6 +11,7 @@ NODE_HOSTNAME="$(hostname)"
 SERVICES_DIR="${HOME}/services"
 SERVICE_FILE="camera.service"
 UV_BIN="${HOME}/.local/bin/uv"
+TARGET_BRANCH="${1:-}"
 case ":${PATH}:" in
     *":${HOME}/.local/bin:"*) ;;
     *) export PATH="${HOME}/.local/bin:${PATH}" ;;
@@ -18,6 +19,9 @@ esac
 
 echo "======================================================================"
 echo "Updating software on node: ${NODE_HOSTNAME}"
+if [[ -n "${TARGET_BRANCH}" ]]; then
+    echo "Target branch: ${TARGET_BRANCH}"
+fi
 echo "======================================================================"
 
 # ---------------------------------------------------------------------------
@@ -26,10 +30,22 @@ echo "======================================================================"
 cd "${HOME}"
 if [[ ! -d "${REPO_NAME}/.git" ]]; then
     echo "Cloning repository..."
-    git clone "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    if [[ -n "${TARGET_BRANCH}" ]]; then
+        git clone -b "${TARGET_BRANCH}" "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    else
+        git clone "${GITHUB_REPO_CLONE_LINK}" "${REPO_NAME}"
+    fi
 else
-    echo "Repository already exists, pulling latest changes..."
-    git -C "${REPO_NAME}" pull
+    cd "${REPO_NAME}"
+    git fetch origin
+    if [[ -n "${TARGET_BRANCH}" ]]; then
+        echo "Checking out branch: ${TARGET_BRANCH}..."
+        git checkout "${TARGET_BRANCH}"
+        git pull origin "${TARGET_BRANCH}"
+    else
+        echo "Pulling latest changes on current branch ($(git branch --show-current))..."
+        git pull
+    fi
 fi
 
 # ---------------------------------------------------------------------------

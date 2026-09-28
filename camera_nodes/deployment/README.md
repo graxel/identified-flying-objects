@@ -77,7 +77,11 @@ Once provisioned, `camera.service` automatically starts on every boot.
 For fast, code-only updates, use `update-camera-node.sh`:
 
 ```bash
+# Update currently checked out branch
 ssh node_user@cam3.local 'bash -s' < camera_nodes/deployment/update-camera-node.sh
+
+# Or switch to and update a specific branch (e.g. dev, main)
+ssh node_user@cam3.local 'bash -s -- dev' < camera_nodes/deployment/update-camera-node.sh
 ```
 
 If you need to completely re-provision the camera node, re-run `set-up-camera-node.sh`:
