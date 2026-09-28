@@ -122,18 +122,8 @@ echo "$(id -un) ALL=(ALL) NOPASSWD: /bin/systemctl restart camera.service, /bin/
 sudo chmod 0440 /etc/sudoers.d/camera-deploy
 
 sudo systemctl daemon-reload
-# ---------------------------------------------------------------------------
-# Camera hardware check
-# ---------------------------------------------------------------------------
-echo "Checking connected camera hardware..."
-if rpicam-hello --list-cameras 2>&1 | grep -q "Available cameras"; then
-    echo "Camera detected successfully!"
-else
-    echo "WARNING: No camera detected! Check the CSI ribbon cable connection." >&2
-fi
-
-echo "Enabling and starting ${SERVICE_FILE}..."
-sudo systemctl enable --now "${SERVICE_FILE}"
+echo "Enabling ${SERVICE_FILE} on boot..."
+sudo systemctl enable "${SERVICE_FILE}"
 
 # ---------------------------------------------------------------------------
 # Avahi: advertise IPv4 only non-interactively
@@ -147,7 +137,10 @@ if [[ -f /etc/avahi/avahi-daemon.conf ]]; then
 fi
 
 echo "======================================================================"
-echo "Setup complete on ${NODE_HOSTNAME}!"
-echo "Service status:"
-sudo systemctl status "${SERVICE_FILE}" --no-pager -n 10 || true
+echo "Base setup complete on ${NODE_HOSTNAME}!"
+echo "Rebooting system to initialize drivers, firmware, and camera bus..."
+echo "After reboot, validate setup by running:"
+echo "  ssh $(id -un)@${NODE_HOSTNAME}.local 'bash -s' < camera_nodes/deployment/validate-camera-node.sh"
 echo "======================================================================"
+
+sudo reboot
