@@ -36,18 +36,19 @@ ssh camera_node_username@camera_node_hostname.local 'bash -s -- dev' < camera_no
 *Replace `camera_node_username` and `camera_node_hostname` with your respective node username and hostname.*
 
 ### What `set-up-camera-node.sh` Executes:
-1. **System packages:** Runs `apt update && apt full-upgrade -y`, installs `git`, `curl`, `python3-picamera2`, `python3-opencv`, and `opencv-data`.
-2. **Git user config:** Non-interactively configures default git username and email.
-3. **`uv` installation:** Installs `uv` to `~/.local/bin/uv` and adds it to `$PATH`.
-4. **Project repo:** Clones or pulls the project repo to `~/identified-flying-objects`.
-5. **Dependency management:** Verifies/creates virtual environment with `uv venv --system-site-packages` and syncs with `uv sync`.
-6. **systemd service:**
+1. **Clock synchronization:** Confirms system clock is synced via NTP to avoid TLS certificate and package release timestamp errors on fresh boots.
+2. **System packages & firmware:** Runs `apt update && apt full-upgrade -y` non-interactively to ensure `raspi-firmware` bootloader components are fully updated. Installs `git`, `curl`, `python3-picamera2`, `python3-opencv`, `opencv-data`, and `imx500-all` (AI Camera software stack).
+3. **Git user config:** Non-interactively configures default git username and email.
+4. **`uv` installation:** Installs `uv` to `~/.local/bin/uv` and adds it to `$PATH`.
+5. **Project repo:** Clones or pulls the project repo to `~/identified-flying-objects`.
+6. **Dependency management:** Verifies/creates virtual environment with `uv venv --system-site-packages` and syncs with `uv sync`.
+7. **systemd service:**
    * Generates `~/services/camera.service` from `camera.service`.
    * Symlinks to `/etc/systemd/system/camera.service`.
-   * Grants passwordless `sudo` rights for service restarts in `/etc/sudoers.d/camera-deploy`.
+   * Grants passwordless `sudo` rights for service management in `/etc/sudoers.d/camera-deploy`.
    * Enables `camera.service` on boot (`systemctl enable camera.service`).
-7. **Avahi configuration:** Sets `use-ipv6=no` and `use-ipv4=yes` in `/etc/avahi/avahi-daemon.conf` and restarts Avahi to avoid IPv6 mDNS issues.
-8. **Reboot:** Automatically reboots the Raspberry Pi so that kernel updates, device tree overlays, and the CSI camera bus are properly probed and initialized.
+8. **Avahi configuration:** Sets `use-ipv6=no` and `use-ipv4=yes` in `/etc/avahi/avahi-daemon.conf` and restarts Avahi to avoid IPv6 mDNS issues.
+9. **Reboot:** Automatically reboots the Raspberry Pi so that kernel updates, device tree overlays, and the CSI camera bus are properly probed and initialized.
 
 
 ## 3. Validate Camera Node (Post-Reboot)
@@ -59,9 +60,10 @@ ssh camera_node_username@camera_node_hostname.local 'bash -s' < camera_nodes/dep
 ```
 
 ### What `validate-camera-node.sh` Checks:
-1. **Service Status:** Confirms `camera.service` is active and running (`systemctl is-active`). If running, this confirms the camera hardware is acquired and actively capturing.
-2. **Hardware Diagnostic (fallback):** If the service is NOT active, runs `rpicam-hello --list-cameras` to determine whether the issue is hardware (ribbon disconnected) or software (Python crash).
-3. **Log Dump:** Dumps the latest journal logs from `camera.service` to verify frame capture performance and telemetry.
+1. **Service Status & Flapping:** Confirms `camera.service` is active and checks `NRestarts` to ensure the service isn't flapping in a restart loop.
+2. **Active Frame Telemetry:** Verifies that the capture pipeline is actually streaming by checking for `Critical Path FPS:` messages in recent service logs.
+3. **Hardware Diagnostic (on failure):** If inactive or failing to capture frames, temporarily frees the camera device and runs `rpicam-hello --list-cameras` to determine whether the issue is hardware (ribbon disconnected) or software (driver/Python crash).
+4. **Log Dump:** Dumps the latest journal logs from `camera.service` to verify frame capture performance and telemetry.
 
 
 ## 4. Useful Service Operations

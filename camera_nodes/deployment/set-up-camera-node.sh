@@ -24,14 +24,29 @@ fi
 echo "======================================================================"
 
 # ---------------------------------------------------------------------------
-# System packages
+# System packages & Firmware
 # ---------------------------------------------------------------------------
-echo "Updating apt package index and upgrading system..."
-sudo apt update
-sudo apt full-upgrade -y
+# Ensure clock is synchronized before running apt to avoid TLS and Release expiry errors
+if command -v timedatectl >/dev/null 2>&1; then
+    echo "Ensuring system time is synchronized via NTP..."
+    timeout 30 bash -c 'until timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q yes; do sleep 1; done' || true
+fi
 
-echo "Installing required system packages and tools..."
-sudo apt install -y git curl python3-picamera2 python3-opencv opencv-data
+echo "Updating apt package index and upgrading system firmware and packages..."
+sudo apt update
+sudo DEBIAN_FRONTEND=noninteractive apt full-upgrade -y
+
+echo "Installing required system packages and camera tools..."
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+    git \
+    curl \
+    python3-picamera2 \
+    python3-opencv \
+    opencv-data \
+    imx500-all
+
+echo "Installed firmware package:"
+dpkg -l raspi-firmware | grep raspi-firmware || true
 
 # ---------------------------------------------------------------------------
 # Git user configuration
@@ -118,7 +133,7 @@ sudo ln -sfn "${SERVICES_DIR}/${SERVICE_FILE}" "/etc/systemd/system/${SERVICE_FI
 
 # Configure passwordless sudo for managing camera.service
 echo "Configuring sudoers permissions for camera.service..."
-echo "$(id -un) ALL=(ALL) NOPASSWD: /bin/systemctl restart camera.service, /bin/systemctl status camera.service, /bin/systemctl is-active camera.service" | sudo tee /etc/sudoers.d/camera-deploy > /dev/null
+echo "$(id -un) ALL=(ALL) NOPASSWD: /bin/systemctl restart camera.service, /bin/systemctl start camera.service, /bin/systemctl stop camera.service, /bin/systemctl status camera.service, /bin/systemctl is-active camera.service" | sudo tee /etc/sudoers.d/camera-deploy > /dev/null
 sudo chmod 0440 /etc/sudoers.d/camera-deploy
 
 sudo systemctl daemon-reload
