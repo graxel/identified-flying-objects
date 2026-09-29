@@ -5,11 +5,10 @@ import socket
 import threading
 import time
 
-from camera import set_up_camera, FrameIngester
-from processor2 import PostProcessor
-from sender import net_send_worker
+from camera import set_up_camera, CaptureAndExtractWorker
+from encoder import PayloadEncoder
+from sender import NetworkSender
 
-TIMING_LOG_DIR = "timing_logs"
 SEND_LOG_DIR = "send_logs"
 # SEND_DEST = ("kalman.local", 8000)
 SEND_DEST = ("graxel.local", 8000)
@@ -26,7 +25,6 @@ HEARTBEAT_INTERVAL_SEC = 5.0
 
 def setup():
     """Perform file system setup, disable GC, and resolve local camera ID."""
-    os.makedirs(TIMING_LOG_DIR, exist_ok=True)
     os.makedirs(SEND_LOG_DIR, exist_ok=True)
 
     gc.disable()
@@ -37,23 +35,22 @@ def setup():
     except ValueError:
         camera_id = 0
 
-    timing_csv_path = os.path.join(TIMING_LOG_DIR, f"timing_{int(time.time())}.csv")
-    return camera_id, timing_csv_path
+    return camera_id
 
 
 def main():
-    camera_id, timing_csv_path = setup()
+    camera_id = setup()
     print(f"Starting camera node. Hostname: {socket.gethostname()}, resolved Camera ID: {camera_id}")
 
     picam2 = set_up_camera(main_size=MAIN_SIZE, low_res_size=LOW_RES_SIZE)
 
     send_queue = queue.Queue(SEND_QUEUE_MAX)
-    postproc_queue = queue.Queue(16)
+    encode_queue = queue.Queue(16)
     shared_stats = {"send_ms": 0.0}
 
-    ingester = FrameIngester(
+    capture_worker = CaptureAndExtractWorker(
         picam2=picam2,
-        postproc_queue=postproc_queue,
+        encode_queue=encode_queue,
         main_size=MAIN_SIZE,
         low_res_size=LOW_RES_SIZE,
         camera_id=camera_id,
@@ -61,8 +58,8 @@ def main():
         realtime_priority=None,
     )
 
-    post_processor = PostProcessor(
-        postproc_queue=postproc_queue,
+    payload_encoder = PayloadEncoder(
+        encode_queue=encode_queue,
         send_queue=send_queue,
         shared_stats=shared_stats,
         camera_id=camera_id,
@@ -71,15 +68,17 @@ def main():
         low_res_interval_sec=LOW_RES_INTERVAL_SEC,
     )
 
-    threading.Thread(target=ingester.run, daemon=True).start()
+    network_sender = NetworkSender(
+        send_queue=send_queue,
+        send_dest=SEND_DEST,
+        shared_stats=shared_stats,
+    )
     
-    threading.Thread(target=post_processor.run, daemon=True).start()
+    threading.Thread(target=capture_worker.run, daemon=True).start()
+    
+    threading.Thread(target=payload_encoder.run, daemon=True).start()
 
-    threading.Thread(
-        target=net_send_worker,
-        args=(send_queue, SEND_DEST, shared_stats),
-        daemon=True,
-    ).start()
+    threading.Thread(target=network_sender.run, daemon=True).start()
 
     try:
         while True:

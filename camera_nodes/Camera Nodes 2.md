@@ -6,11 +6,11 @@ The main goal of each camera node is to capture images, identify interesting pat
 
 This code now runs with one request-owned critical-path thread plus two post-release worker threads:
 
-- critical-path capture and processing,
-- frame encoding,
-- network send.
+- critical-path capture and extraction (`CaptureAndExtractWorker` in `camera.py`),
+- payload encoding (`PayloadEncoder` in `encoder.py`),
+- network send (`NetworkSender` in `sender.py`).
 
-## Critical-path thread
+## Critical-path thread (`CaptureAndExtractWorker`)
 
 A single thread owns the camera request from `capture_request()` through `request.release()`. That thread performs the minimum request-lifetime work in one place:
 
@@ -21,12 +21,12 @@ A single thread owns the camera request from `capture_request()` through `reques
 - copy only the durable outputs that must survive request release,
 - release the request.
 
-This keeps the request lifetime explicit and avoids queueing live camera requests between threads.
+This keeps the request lifetime explicit and avoids queueing live camera requests between threads. Results are placed on the `encode_queue`.
 
-## Encoder thread
+## Encoder thread (`PayloadEncoder`)
 
-The encoder thread receives copied post-release frame data from the critical-path thread. It performs slower work, such as JPEG encoding of the low-resolution frame, without extending camera buffer lifetime.
+The encoder thread receives copied post-release frame data from the `encode_queue`. It performs slower work, such as JPEG encoding of the low-resolution frame, without extending camera buffer lifetime. Results are placed on the `send_queue`.
 
-## Sender thread
+## Sender thread (`NetworkSender`)
 
 The sender thread publishes patches, full-frame payloads, and telemetry over ZeroMQ. Because it only sees copied post-release data, network stalls do not directly hold camera requests open.

@@ -8,13 +8,15 @@ CRITICAL PATH LOOP: (can only happen on one core/thread)
 
     - diffs => motion boxes
 
-    - AI boxes and motion boxes => patches
+    - AI boxes AND motion boxes => patches
 
     - release camera mem
 
+    - timing stuff
+
     - pack patches, low_res, and timing data ++and diffs and bgs++ into a preprocessed_frame dict
     
-    - push that onto a postprocessing queue
+    - push that onto an encoding queue
 
 
 OTHER STEPS: (can happen on one or more other cores/threads)
@@ -24,6 +26,8 @@ OTHER STEPS: (can happen on one or more other cores/threads)
     jpeg encode low_res ++and diffs and bgs++
 
     use camera calibration to convert patch coords to 3D ray
+
+    serialize everything to send
 
     send patches and jpeg-encoded stuff [and ml_train]
 

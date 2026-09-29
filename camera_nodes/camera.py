@@ -67,19 +67,19 @@ def set_up_camera(main_size, low_res_size, max_retries=5, retry_delay=5):
     return picam2
 
 
-class FrameIngester:
+class CaptureAndExtractWorker:
     """
     Owns the critical path for one camera:
       capture_request -> request-owned processing -> request.release
 
     Anything that must happen while the camera request is alive stays in this
-    thread. Post-release work (encoding, sending) is handed off to other queues.
+    thread. Post-release work (encoding, sending) is handed off via encode_queue.
     """
 
     def __init__(
         self,
         picam2,
-        postproc_queue,
+        encode_queue,
         main_size,
         low_res_size,
         camera_id=0,
@@ -87,7 +87,7 @@ class FrameIngester:
         realtime_priority=None,
     ):
         self.picam2 = picam2
-        self.postproc_queue = postproc_queue
+        self.encode_queue = encode_queue
         self.camera_id = camera_id
         self.core_id = core_id
         self.realtime_priority = realtime_priority
@@ -197,11 +197,11 @@ class FrameIngester:
                 "patches": patches,
             }
 
-            # 9. Push that onto a postprocessing queue
+            # 9. Push that onto the encode queue
             try:
-                self.postproc_queue.put(preprocessed_frame, block=False)
+                self.encode_queue.put(preprocessed_frame, block=False)
             except queue.Full:
-                print("postproc_queue is full!")
+                print("encode_queue is full!")
                 pass
 
             self.frames_processed += 1
@@ -213,7 +213,7 @@ class FrameIngester:
                 fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
                 self.fps_window_start = time.monotonic()
                 self.fps_frame_count = 0
-                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Postproc Q: {self.postproc_queue.qsize()}")
+                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Encode Q: {self.encode_queue.qsize()}")
 
 
     def _generate_patches_list(self, patch_dict):
