@@ -1,0 +1,74 @@
+[
+  {
+    "id": "lm1",
+    "name": "Wall Graphic 1 (Lower)",
+    "description": "Lower painted graphic corner on pillar",
+    "hint": "Click corner point 1 circled in red",
+    "world_pos": [
+      457.0,
+      16.0,
+      112.0
+    ],
+    "example_image": "RC/pt1.png"
+  },
+  {
+    "id": "lm2",
+    "name": "Wall Graphic 2 (Upper)",
+    "description": "Upper painted graphic corner on pillar",
+    "hint": "Click corner point 2 circled in red",
+    "world_pos": [
+      455.0,
+      16.0,
+      255.0
+    ],
+    "example_image": "RC/pt2.png"
+  },
+  {
+    "id": "lm3",
+    "name": "Duct Vent Corner",
+    "description": "Top-right corner of silver vent on round duct",
+    "hint": "Click top-right corner of vent 3 circled in red",
+    "world_pos": [
+      181.0,
+      185.0,
+      321.0
+    ],
+    "example_image": "RC/pt3.png"
+  },
+  {
+    "id": "lm4",
+    "name": "Wall Box Bottom Corner",
+    "description": "Bottom-left outer corner of wall-mounted electrical box",
+    "hint": "Click bottom corner of box 4 circled in red",
+    "world_pos": [
+      7.0,
+      288.0,
+      241.0
+    ],
+    "example_image": "RC/pt4.png"
+  },
+  {
+    "id": "lm5",
+    "name": "Mural Robot Head Corner",
+    "description": "Top-left head corner of drawn robot",
+    "hint": "Click corner of robot head 5 circled in red",
+    "world_pos": [
+      207.0,
+      0.0,
+      231.0
+    ],
+    "example_image": "RC/pt5.png"
+  },
+  {
+    "id": "lm6",
+    "name": "Mural Keyboard Corner",
+    "description": "Front-left base corner of drawn keyboard",
+    "hint": "Click front corner of keyboard 6 circled in red",
+    "world_pos": [
+      123.0,
+      0.0,
+      142.5
+    ],
+    "example_image": "RC/pt6.png"
+  }
+]

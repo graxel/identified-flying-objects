@@ -1,0 +1,52 @@
+RC measurements LBU coodinate system (Left, Back, Up) (centimeters)
+
+1
+L: 457
+B: 16
+U: 112
+
+2
+L: 455
+B: 16
+U: 255
+
+3
+L: 181
+B: 185
+U: 321
+
+4
+L: 7
+B: 288
+U: 241
+
+5
+L: 207
+B: 0
+U: 231
+
+6
+L: 123
+B: 0
+U: 142.5
+
+cam1
+L: 8
+B: 473
+U: 149
+
+cam2
+L: 52
+B: 473
+U: 171
+
+cam3
+L: 52
+B: 473
+U: 171
+
+cam4
+L: 8
+B: 473
+U: 149
+

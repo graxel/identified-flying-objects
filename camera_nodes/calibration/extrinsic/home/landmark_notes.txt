@@ -1,0 +1,94 @@
+
+
+
+Ground Elevation
+5
+
+Height Roof
+1,408.377901
+
+NAME
+Tower 1 World Trade Ctr
+
+=========
+
+
+Ground Elevation
+6
+Height Roof
+511
+LAST_EDITED_DATE
+2017 Aug 22 01:28:14 PM
+LAST_STATUS_TYPE
+Constructed
+Map Pluto BBL
+1000057501
+NAME
+2 New York Plaza
+
+=======
+Pace U tower
+
+
+
+
+1
+lat, lon: -74.012480, 40.701930
+height: 662
+ground: 6
+
+
+2
+lat, lon: -74.012850, 40.712872
+height: 1,408.377901
+ground: 5
+
+
+3
+lat, lon: -74.008774, 40.702876
+height: 6
+ground: 711
+
+
+4
+lat, lon: -74.005399, 40.710956
+height: 860.84409712
+ground: 27
+
+
+5
+lat, lon: -74.002512, 40.713705
+height: 544.33794801
+ground: 18
+
+
+6
+lat, lon: -73.977366, 40.764976
+height: 1,428
+ground: 58
+
+
+7
+lat, lon: -73.975806, 40.756100
+height: 1,388
+ground: 60
+
+
+8
+lat, lon: -73.991217, 40.710203
+height: 800
+ground: 10
+
+
+
+
+19 delevan is 65 feet high
+and the ground is 8
+
+cams center
+lat, lon: -74.006656, 40.678708
+
+cams unit vector
+lat, lon: -74.006729, 40.678758
+
+measure distance between 

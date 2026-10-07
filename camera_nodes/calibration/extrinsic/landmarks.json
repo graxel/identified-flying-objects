@@ -1,0 +1,50 @@
+[
+  {
+    "id": "lm1",
+    "name": "East River Bridge South Tower",
+    "description": "The southeast corner of the south tower base",
+    "hint": "Click the very bottom corner of the south tower where it meets the roadway",
+    "world_enu": [120.5, 340.2, 4.0],
+    "example_image": null
+  },
+  {
+    "id": "lm2",
+    "name": "Buoy Red 12",
+    "description": "The red navigation buoy at channel marker 12",
+    "hint": "Click the top of the buoy (the lamp housing)",
+    "world_enu": [-45.0, 890.1, 2.5],
+    "example_image": null
+  },
+  {
+    "id": "lm3",
+    "name": "Building Rooftop Corner",
+    "description": "Northwest corner of the grey rooftop parapet",
+    "hint": "Click the sharp corner where north and west parapet walls meet",
+    "world_enu": [560.0, 120.0, 55.0],
+    "example_image": null
+  },
+  {
+    "id": "lm4",
+    "name": "Pier End",
+    "description": "The very tip of the southernmost pier",
+    "hint": "Click the furthest out point at the end of the pier",
+    "world_enu": [80.0, -30.0, 0.5],
+    "example_image": null
+  },
+  {
+    "id": "lm5",
+    "name": "Smokestack Top",
+    "description": "The rim of the nearest smokestack",
+    "hint": "Click the highest point of the smokestack rim",
+    "world_enu": [-200.0, 450.0, 80.0],
+    "example_image": null
+  },
+  {
+    "id": "lm6",
+    "name": "Water Tower",
+    "description": "The top of the round water tower on the roof",
+    "hint": "Click the very top (apex) of the water tower",
+    "world_enu": [310.0, 670.0, 42.0],
+    "example_image": null
+  }
+]

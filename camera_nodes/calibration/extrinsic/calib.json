@@ -1,0 +1,27 @@
+{
+  "_comment": "Fill in enu_origin and cameras[N].location_enu before running extrinsic_solve.py.",
+  "enu_origin": {
+    "lat": 40.7128,
+    "lon": -74.0060,
+    "alt": 0.0,
+    "comment": "WGS84 lat/lon/alt (decimal degrees, metres) of your ENU coordinate origin. Pick a stable reference point in your field of view."
+  },
+  "cameras": {
+    "1": {
+      "location_enu": [0.0, 0.0, 0.0],
+      "comment": "Fill in [east_m, north_m, up_m] offset from enu_origin for camera 1 (cam1.local). Measure with GPS or tape measure."
+    },
+    "2": {
+      "location_enu": [0.0, 0.0, 0.0],
+      "comment": "Fill in for camera 2"
+    },
+    "3": {
+      "location_enu": [0.0, 0.0, 0.0],
+      "comment": "Fill in for camera 3"
+    },
+    "4": {
+      "location_enu": [0.0, 0.0, 0.0],
+      "comment": "Fill in for camera 4"
+    }
+  }
+}

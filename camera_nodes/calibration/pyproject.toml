@@ -1,0 +1,17 @@
+[project]
+name = "ifo-calibration"
+version = "0.1.0"
+description = "Intrinsic and extrinsic calibration tools for the IFO camera array"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+]
+
+[tool.uv]
+# Run from the calibration/ directory:
+#   uv run intrinsic_capture.py
+#   uv run intrinsic_calibrate.py --board-w 9 --board-h 6 --square-mm 25
+#   uv run extrinsic_mark.py
+#   uv run extrinsic_solve.py

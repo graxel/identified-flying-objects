@@ -1,2 +1,8 @@
 uv.lock
 .venv/
+
+
+# Local calibration captures
+/calibration/intrinsic/cam[1-4]/captures/
+/calibration/intrinsic/cam[1-4]/used/
+
