@@ -17,67 +17,49 @@ def _encode_img(img):
     success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     return buf.tobytes() if success else None
 
-class PayloadEncoder:
+class FrameProcessor:
     """
     Handles all processing steps after the camera memory has been released.
-    Reads from encode_queue and pushes to send_queue.
+    Reads from process_queue and pushes to send_queue.
     """
-    def __init__(self, encode_queue, send_queue, shared_stats, camera_id, ml_size, ml_train_interval_sec=1.0, low_res_interval_sec=1.0):
-        self.encode_queue = encode_queue
+    def __init__(self, process_queue, send_queue, shared_stats, camera_id, low_res_interval_sec=1.0):
+        self.process_queue = process_queue
         self.send_queue = send_queue
         self.shared_stats = shared_stats
         self.camera_id = camera_id
-        self.ml_w, self.ml_h = ml_size
-        self.ml_train_interval_sec = ml_train_interval_sec
         self.low_res_interval_sec = low_res_interval_sec
-        
-        self.last_ml_train_send_time = 0.0
-        self.last_low_res_send_time = 0.0
+        self.last_low_res_encode_time = 0.0
 
     def run(self):
         while True:
             try:
-                frame_data = self.encode_queue.get()
-                now_sec = time.time()
-                
-                # Check intervals
-                send_ml = False # never send (for testing) #(now_sec - self.last_ml_train_send_time) >= self.ml_train_interval_sec
-                send_low_res = (now_sec - self.last_low_res_send_time) >= self.low_res_interval_sec
-                # True # always send (for testing) but maybe this broke something #
-                
-                # 1. [low_res => ml_train]
-                low_res_gray = frame_data["low_res_gray"]
-                
-                if send_ml:
-                    self.last_ml_train_send_time = now_sec
-                    ml_train_start = time.perf_counter_ns()
-                    ml_train_frame = cv2.resize(low_res_gray, (self.ml_w, self.ml_h), interpolation=cv2.INTER_AREA)
-                    ml_train_ns = time.perf_counter_ns() - ml_train_start
-                    frame_data["processing_times"]["ml_train_ns"] = ml_train_ns
-                    ml_train_bytes = ml_train_frame.tobytes()
-                    ml_train_shape = ml_train_frame.shape
-                else:
-                    ml_train_bytes = None
-                    ml_train_shape = None
-                
-                # 2. jpeg encode low_res and diffs
-                if send_low_res:
-                    self.last_low_res_send_time = now_sec
-                    low_res_shape = low_res_gray.shape
-                    low_res_jpg = _encode_img(low_res_gray)
+                encode_time = time.time()
 
-                    # Encoding these as well when we send low_res
+                frame_data = self.process_queue.get()
+                
+                # Check if interval has passed (then it's time to send another low_res frame)
+                send_low_res = (encode_time - self.last_low_res_encode_time) >= self.low_res_interval_sec
+                
+                # jpeg encode low_res and diffs
+                if send_low_res:
+                    low_res_gray = frame_data["low_res_gray"]
+                    low_res_jpg = _encode_img(low_res_gray)
                     slow_diff_jpg = _encode_img(frame_data.get("slow_diff"))
                     fast_diff_jpg = _encode_img(frame_data.get("fast_diff"))
                     # slow_bg_jpg = _encode_img(frame_data.get("slow_bg"))
                     # fast_bg_jpg = _encode_img(frame_data.get("fast_bg"))
+                    
+                    self.last_low_res_encode_time = encode_time
+                    low_res_shape = low_res_gray.shape
+
                 else:
-                    low_res_shape = None
                     low_res_jpg = None
                     slow_diff_jpg = None
                     fast_diff_jpg = None
                     # slow_bg_jpg = None
                     # fast_bg_jpg = None
+
+                    low_res_shape = None
                 
                 # 3. use camera calibration to convert patch coords to 3D ray
                 patches = frame_data["patches"]
@@ -117,13 +99,11 @@ class PayloadEncoder:
                     pass
 
                 # 5. pack full frames if interval passed
-                if send_ml or send_low_res:
+                if send_low_res:
                     send_frames_obj = {
                         "type": "frames",
                         "camera_id": self.camera_id,
                         "sensor_ts_ns": frame_data["frame_timestamps"]["sensor_ts_ns"],
-                        "ml_train": ml_train_bytes,
-                        "ml_train_shape": ml_train_shape,
                         "low_res": low_res_jpg,
                         "low_res_shape": low_res_shape,
                         "slow_diff": slow_diff_jpg,
@@ -138,4 +118,4 @@ class PayloadEncoder:
                         pass
 
             except Exception as e:
-                print(f"PayloadEncoder worker error: {e}")
+                print(f"FrameProcessor worker error: {e}")

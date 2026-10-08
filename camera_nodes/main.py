@@ -6,7 +6,7 @@ import threading
 import time
 
 from camera import set_up_camera, CaptureAndExtractWorker
-from encoder import PayloadEncoder
+from process_frames import FrameProcessor
 from sender import NetworkSender
 
 SEND_LOG_DIR = "send_logs"
@@ -45,12 +45,12 @@ def main():
     picam2 = set_up_camera(main_size=MAIN_SIZE, low_res_size=LOW_RES_SIZE)
 
     send_queue = queue.Queue(SEND_QUEUE_MAX)
-    encode_queue = queue.Queue(16)
+    process_queue = queue.Queue(16)
     shared_stats = {"send_ms": 0.0}
 
     capture_worker = CaptureAndExtractWorker(
         picam2=picam2,
-        encode_queue=encode_queue,
+        process_queue=process_queue,
         main_size=MAIN_SIZE,
         low_res_size=LOW_RES_SIZE,
         camera_id=camera_id,
@@ -58,8 +58,8 @@ def main():
         realtime_priority=None,
     )
 
-    payload_encoder = PayloadEncoder(
-        encode_queue=encode_queue,
+    frame_processor = FrameProcessor(
+        process_queue=process_queue,
         send_queue=send_queue,
         shared_stats=shared_stats,
         camera_id=camera_id,
@@ -76,7 +76,7 @@ def main():
     
     threading.Thread(target=capture_worker.run, daemon=True).start()
     
-    threading.Thread(target=payload_encoder.run, daemon=True).start()
+    threading.Thread(target=frame_processor.run, daemon=True).start()
 
     threading.Thread(target=network_sender.run, daemon=True).start()
 

@@ -4,6 +4,7 @@ import time
 import random
 import cv2
 import numpy as np
+from picamera2 import MappedArray
 
 
 ALPHA_SLOW = 0.02
@@ -30,14 +31,23 @@ def parse_ml_output(metadata, main_size, low_res_size):
     return ml_info
 
 
-def extract_patches_from_mapped(mapped_arr, ml_info):
-    """Zero-copy slice patches out of the 12MP memory-mapped main array."""
-    patch_dict = {}
-    for detection_id, dims in ml_info.items():
-        x, y, w, h = dims["x"], dims["y"], dims["w"], dims["h"]
-        patch = mapped_arr[y:y + h, x:x + w].copy()
-        patch_dict[detection_id] = {"x": x, "y": y, "w": w, "h": h, "px": patch}
-    return patch_dict
+def extract_patches(camera_mem, motion_boxes):
+    """Slice patches out of the high-res frame while the camera request is alive."""
+    with MappedArray(camera_mem, "main") as m:
+        return [
+            {
+                "source": src,
+                "x": dims["x"],
+                "y": dims["y"],
+                "w": dims["w"],
+                "h": dims["h"],
+                "px": m.array[
+                    dims["y"]:dims["y"] + dims["h"],
+                    dims["x"]:dims["x"] + dims["w"]
+                ].copy().tobytes()
+            }
+            for src, dims in motion_boxes.items()
+        ]
 
 
 def compute_ema_diff(frame, bg, alpha):
@@ -133,19 +143,8 @@ def perform_motion_differencing(frame, slow_bg, fast_bg): # , scale_x, scale_y, 
     Run EMA background subtraction on the low_res frame.
     Returns bounding boxes mapped to the main coordinate space, diff duration, and updated slow_bg.
     """
-    diff_start_ns = time.perf_counter_ns()
-
     slow_diff, slow_bg = compute_ema_diff(frame, slow_bg, alpha=ALPHA_SLOW)
     fast_diff, fast_bg = compute_ema_diff(frame, fast_bg, alpha=ALPHA_FAST)
 
-    # if slow_diff is None:
-    #     ml_info = {}
-
-    # else:
-    #     ml_info = process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h)
-
-    diff_time_ns = time.perf_counter_ns() - diff_start_ns
-
-    # return ml_info, diff_time_ns, slow_bg
-    return slow_diff, slow_bg, fast_diff, fast_bg, diff_time_ns
+    return slow_diff, slow_bg, fast_diff, fast_bg
 

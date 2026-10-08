@@ -6,7 +6,7 @@ from libcamera import Transform
 import time
 import queue
 
-from cv_ops import extract_patches_from_mapped, perform_motion_differencing, process_motion_diffs
+from cv_ops import extract_patches, perform_motion_differencing, process_motion_diffs
 from system_utils import try_pin_and_prioritize
 
 CONSOLE_LOG_INTERVAL = 10
@@ -73,16 +73,16 @@ class CaptureAndExtractWorker:
       capture_request -> request-owned processing -> request.release
 
     Anything that must happen while the camera request is alive stays in this
-    thread. Post-release work (packing, sending) is handed off via pack_queue.
+    thread. Post-release work (processing, sending) is handed off via process_queue.
 
     The complete output of this worker is a "frame", composed of metadata,
-    a low_res image, 
+    a low-res image, motion diffs, and high-res patches.
     """
 
     def __init__(
         self,
         picam2,
-        pack_queue,
+        process_queue,
         main_size,
         low_res_size,
         camera_id=0,
@@ -90,7 +90,7 @@ class CaptureAndExtractWorker:
         realtime_priority=None,
     ):
         self.picam2 = picam2
-        self.pack_queue = pack_queue
+        self.process_queue = process_queue
         self.camera_id = camera_id
         self.core_id = core_id
         self.realtime_priority = realtime_priority
@@ -113,6 +113,7 @@ class CaptureAndExtractWorker:
         camera_mem = self.picam2.capture_request()
         metadata = camera_mem.get_metadata()
         return camera_mem, metadata
+
 
     def get_low_res_image(self, camera_mem):
         with MappedArray(camera_mem, "lores") as m_low_res:
@@ -164,19 +165,7 @@ class CaptureAndExtractWorker:
 
             # 2c. Extract patches from high-res frame
             patch_start_ns = time.perf_counter_ns()
-            with MappedArray(camera_mem, "main") as m_main:
-                patch_dict = extract_patches_from_mapped(m_main.array, motion_boxes)
-            patches = [
-                {
-                    "source": src,
-                    "x": p["x"],
-                    "y": p["y"],
-                    "w": p["w"],
-                    "h": p["h"],
-                    "px": p["px"].tobytes(),
-                }
-                for src, p in patch_dict.items()
-            ]
+            patches = extract_patches(camera_mem, motion_boxes)
             patch_done_ns = time.perf_counter_ns()
 
             # 3. Release camera mem (END OF CRITICAL PATH)
@@ -210,9 +199,9 @@ class CaptureAndExtractWorker:
 
             # 5. Push dict onto the pack queue
             try:
-                self.pack_queue.put(frame, block=False)
+                self.process_queue.put(frame, block=False)
             except queue.Full:
-                print("pack_queue is full!")
+                print("process_queue is full!")
                 pass
 
             # 6. Update counts
@@ -226,6 +215,6 @@ class CaptureAndExtractWorker:
                 fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
                 self.fps_window_start = now
                 self.fps_frame_count = 0
-                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Pack Queue: {self.pack_queue.qsize()}")
+                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Process Queue: {self.process_queue.qsize()}")
 
 
