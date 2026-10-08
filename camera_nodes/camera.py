@@ -6,7 +6,7 @@ from libcamera import Transform
 import time
 import queue
 
-from cv_ops import extract_patches_from_mapped, parse_ml_output, perform_motion_differencing, process_motion_diffs
+from cv_ops import extract_patches_from_mapped, perform_motion_differencing, process_motion_diffs
 from system_utils import try_pin_and_prioritize
 
 CONSOLE_LOG_INTERVAL = 10
@@ -73,13 +73,16 @@ class CaptureAndExtractWorker:
       capture_request -> request-owned processing -> request.release
 
     Anything that must happen while the camera request is alive stays in this
-    thread. Post-release work (encoding, sending) is handed off via encode_queue.
+    thread. Post-release work (packing, sending) is handed off via pack_queue.
+
+    The complete output of this worker is a "frame", composed of metadata,
+    a low_res image, 
     """
 
     def __init__(
         self,
         picam2,
-        encode_queue,
+        pack_queue,
         main_size,
         low_res_size,
         camera_id=0,
@@ -87,7 +90,7 @@ class CaptureAndExtractWorker:
         realtime_priority=None,
     ):
         self.picam2 = picam2
-        self.encode_queue = encode_queue
+        self.pack_queue = pack_queue
         self.camera_id = camera_id
         self.core_id = core_id
         self.realtime_priority = realtime_priority
@@ -102,21 +105,23 @@ class CaptureAndExtractWorker:
         self.slow_bg = None
         self.fast_bg = None
 
-        self.frames_processed = 0
         self.fps_frame_count = 0
         self.fps_window_start = time.monotonic()
         self.shot_num = 0
 
     def get_next_capture(self):
-        capture_start_ns = time.perf_counter_ns()
         camera_mem = self.picam2.capture_request()
         metadata = camera_mem.get_metadata()
-        capture_done_ns = time.perf_counter_ns()
-        return camera_mem, metadata, capture_start_ns, capture_done_ns
+        return camera_mem, metadata
 
-    def get_frame_timestamps(self, metadata):
+    def get_low_res_image(self, camera_mem):
+        with MappedArray(camera_mem, "lores") as m_low_res:
+            low_res_gray = m_low_res.array[:self.low_res_h, :self.low_res_w].copy()
+        return low_res_gray
+
+    def get_sensor_timestamps(self, metadata):
         sensor_monotonic_ns = metadata.get("SensorTimestamp")
-        frame_duration_us = metadata.get("FrameDuration")
+        capture_duration_us = metadata.get("FrameDuration")
 
         mono_now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         real_now = time.clock_gettime_ns(time.CLOCK_REALTIME)
@@ -125,109 +130,102 @@ class CaptureAndExtractWorker:
 
         return {
             "raw_monotonic_ts_ns": sensor_monotonic_ns,
-            "frame_duration_us": frame_duration_us,
+            "capture_duration_us": capture_duration_us,
             "sensor_ts_ns": global_sensor_ts_ns,
         }
 
     def run(self):
-        """Blocking loop. Run this in a dedicated thread. This contains the CRITICAL PATH."""
+        """This loop gets run in a dedicated thread. This is the CRITICAL PATH."""
         try_pin_and_prioritize(self.core_id, self.realtime_priority)
 
         while True:
             # 1. Camera capture
-            camera_mem, metadata, capture_start_ns, capture_done_ns = self.get_next_capture()
-            preproc_start_ns = time.perf_counter_ns()
+            capture_start_ns = time.perf_counter_ns()
+            camera_mem, metadata = self.get_next_capture()
+            capture_done_ns = time.perf_counter_ns()
 
-            # 2. AI output => AI boxes
-            # ai_boxes = parse_ml_output(metadata, self.main_size, self.low_res_size)  # TODO: real model
+            # 2. Patch extraction
+            extraction_start_ns = time.perf_counter_ns()
 
-            # 3. low_res => diffs
-            with MappedArray(camera_mem, "lores") as m_low_res:
-                low_res_gray = m_low_res.array[:self.low_res_h, :self.low_res_w].copy()
+            # 2a. Make motion diffs
+            diff_start_ns = time.perf_counter_ns()
+            low_res_gray = self.get_low_res_image(camera_mem)
+            slow_diff, self.slow_bg, fast_diff, self.fast_bg = \
+                perform_motion_differencing(low_res_gray, self.slow_bg, self.fast_bg)
+            diff_done_ns = time.perf_counter_ns()
 
-            slow_diff, self.slow_bg, fast_diff, self.fast_bg, diff_time_ns = perform_motion_differencing(
-                low_res_gray, self.slow_bg, self.fast_bg
-            )
-
-            # 4. diffs => motion boxes
+            # 2b. Make motion boxes <- I fear this will take the longest; let's find out.
+            box_start_ns = time.perf_counter_ns()
             if slow_diff is not None and fast_diff is not None:
                 motion_boxes = process_motion_diffs(slow_diff, fast_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
             else:
                 motion_boxes = {}
+            box_done_ns = time.perf_counter_ns()
 
-            # 5. AI boxes and motion boxes => patches
-            all_boxes = {}
-            # for k, v in ai_boxes.items():
-            #     all_boxes[f"ai_{k}"] = v
-            for k, v in motion_boxes.items():
-                all_boxes[f"mo_{k}"] = v
-
+            # 2c. Extract patches from high-res frame
+            patch_start_ns = time.perf_counter_ns()
             with MappedArray(camera_mem, "main") as m_main:
-                patch_dict = extract_patches_from_mapped(m_main.array, all_boxes)
-            
-            patches = self._generate_patches_list(patch_dict)
+                patch_dict = extract_patches_from_mapped(m_main.array, motion_boxes)
+            patches = [
+                {
+                    "source": src,
+                    "x": p["x"],
+                    "y": p["y"],
+                    "w": p["w"],
+                    "h": p["h"],
+                    "px": p["px"].tobytes(),
+                }
+                for src, p in patch_dict.items()
+            ]
+            patch_done_ns = time.perf_counter_ns()
 
-            # 6. Release camera mem (END OF CRITICAL PATH)
+            # 3. Release camera mem (END OF CRITICAL PATH)
             camera_mem.release()
 
-            preproc_done_ns = time.perf_counter_ns()
+            extraction_done_ns = time.perf_counter_ns()
 
-            # 7. Timing stuff
-            frame_timestamps = self.get_frame_timestamps(metadata)
-            frame_timestamps['capture_start_ns'] = capture_start_ns
-            frame_timestamps['capture_done_ns'] = capture_done_ns
-            shot_id = f"frame_{self.shot_num:06d}"
-
-            # 8. Pack patches, low_res, and timing data ++and diffs and bgs++ into a preprocessed_frame dict
-            preprocessed_frame = {
+            # 4. Gather everything in a dictionary
+            frame = {
                 "camera_id": self.camera_id,
-                "shot_id": shot_id,
-                "metadata": metadata,
-                "frame_timestamps": frame_timestamps,
-                "processing_times": {
-                    "preproc_start_ns": preproc_start_ns,
-                    "preproc_done_ns": preproc_done_ns,
-                    "diff_time_ns": diff_time_ns,
-                },
+                "shot_id": f"frame_{self.shot_num:09d}",
                 "low_res_gray": low_res_gray,
                 "slow_diff": slow_diff,
                 "fast_diff": fast_diff,
-                # "slow_bg": self.slow_bg.copy() if self.slow_bg is not None else None,
-                # "fast_bg": self.fast_bg.copy() if self.fast_bg is not None else None,
                 "patches": patches,
+                "metadata": metadata,
+                "sensor_timestamps": self.get_sensor_timestamps(metadata),
+                "capture_timestamps": {
+                    "capture_start_ns": capture_start_ns,
+                    "capture_done_ns":  capture_done_ns,
+                    "extraction_start_ns": extraction_start_ns,
+                    "diff_start_ns": diff_start_ns,
+                    "diff_done_ns":  diff_done_ns,
+                    "box_start_ns": box_start_ns,
+                    "box_done_ns":  box_done_ns,
+                    "patch_start_ns": patch_start_ns,
+                    "patch_done_ns":  patch_done_ns,
+                    "extraction_done_ns": extraction_done_ns,
+                },
             }
 
-            # 9. Push that onto the encode queue
+            # 5. Push dict onto the pack queue
             try:
-                self.encode_queue.put(preprocessed_frame, block=False)
+                self.pack_queue.put(frame, block=False)
             except queue.Full:
-                print("encode_queue is full!")
+                print("pack_queue is full!")
                 pass
 
-            self.frames_processed += 1
+            # 6. Update counts
             self.fps_frame_count += 1
             self.shot_num += 1
 
-            if self.frames_processed % CONSOLE_LOG_INTERVAL == 0:
-                elapsed = time.monotonic() - self.fps_window_start
+            # 7. Display metrics
+            if self.shot_num % CONSOLE_LOG_INTERVAL == 0:
+                now = time.monotonic()
+                elapsed = now - self.fps_window_start
                 fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
-                self.fps_window_start = time.monotonic()
+                self.fps_window_start = now
                 self.fps_frame_count = 0
-                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Encode Q: {self.encode_queue.qsize()}")
+                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Pack Queue: {self.pack_queue.qsize()}")
 
 
-    def _generate_patches_list(self, patch_dict):
-        """Generate a list of patches."""
-        patches = []
-        for source_id, patch in patch_dict.items():
-            patches.append(
-                {
-                    "source": source_id,
-                    "x": patch["x"],
-                    "y": patch["y"],
-                    "w": patch["w"],
-                    "h": patch["h"],
-                    "px": patch["px"].tobytes(),
-                }
-            )
-        return patches
