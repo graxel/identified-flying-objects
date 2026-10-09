@@ -43,7 +43,6 @@ CV_PARAM_DEFAULTS = {
     "morph_kernel":       3,   # structuring element kernel size (1, 3, 5, 7, 9)
     "morph_open_iter":    1,   # morphological open iterations (0 to 5)
     "morph_close_iter":   2,   # morphological close iterations (0 to 5)
-    "frame_skip":         0,   # 0=every frame, 1=every 2nd, …, 9=every 10th
 }
 
 
@@ -153,7 +152,6 @@ class WorkbenchState:
             "morph_kernel":       self.cv_params["morph_kernel"],
             "morph_open_iter":    self.cv_params["morph_open_iter"],
             "morph_close_iter":   self.cv_params["morph_close_iter"],
-            "frame_skip":         self.cv_params["frame_skip"],
         }
         try:
             self._param_pub.send_multipart([b"PARAMS", json.dumps(payload).encode()])
@@ -255,7 +253,6 @@ def main():
     cv2.createTrackbar("Morph Kernel",    CTRL_WINDOW, state.cv_params["morph_kernel"],         9,   make_cv_tb_cb("morph_kernel"))
     cv2.createTrackbar("Morph Open",      CTRL_WINDOW, state.cv_params["morph_open_iter"],      5,   make_cv_tb_cb("morph_open_iter"))
     cv2.createTrackbar("Morph Close",     CTRL_WINDOW, state.cv_params["morph_close_iter"],     5,   make_cv_tb_cb("morph_close_iter"))
-    cv2.createTrackbar("Frame Skip",      CTRL_WINDOW, state.cv_params["frame_skip"],          9,   make_cv_tb_cb("frame_skip"))
 
     # Initial broadcast of loaded parameters
     state._broadcast_cv_params()
@@ -385,12 +382,13 @@ def main():
                 header_color = (0, 255, 255)
                 if cam and cam.telemetry:
                     cap_ms, diff_ms, bbox_ms, _, extract_ms, _, _, _, cpu_temp, _, _, _ = cam.telemetry
-                    crit_ms = diff_ms + bbox_ms + extract_ms
-                    if crit_ms > 100.0:
-                        header_color = (0, 0, 255)  # Red warning: exceeded 100ms hardware budget!
-                        telem_text = f" | CRIT: {crit_ms:.1f}ms [>100ms!] (d:{diff_ms:.0f} b:{bbox_ms:.0f}) | {cpu_temp:.0f}C"
+                    crit_ms = cap_ms + diff_ms + bbox_ms + extract_ms
+                    alert_level = 85.0
+                    if crit_ms > alert_level:
+                        header_color = (0, 0, 255)  # Red warning: approaching 100ms hardware budget!
+                        telem_text = f" | CRIT: {crit_ms:.1f}ms [>{alert_level} ms!] (c:{cap_ms:.0f} d:{diff_ms:.0f} b:{bbox_ms:.0f} x:{extract_ms:.0f}) | {cpu_temp:.0f}C"
                     else:
-                        telem_text = f" | crit: {crit_ms:.1f}ms (d:{diff_ms:.0f} b:{bbox_ms:.0f}) | {cpu_temp:.0f}C"
+                        telem_text = f" | crit: {crit_ms:.1f}ms (c:{cap_ms:.0f} d:{diff_ms:.0f} b:{bbox_ms:.0f} x:{extract_ms:.0f}) | {cpu_temp:.0f}C"
 
                 cv2.putText(colored, base_title + telem_text, (8, 18), font, 0.40, header_color, 1)
                 return colored
@@ -475,8 +473,7 @@ def main():
                 print(f"[Broadcast] cv_params sent — α_slow={p['alpha_slow_x1000']/1000:.3f} "
                       f"α_fast={p['alpha_fast_x100']/100:.2f} thresh={p['diff_thresh']} "
                       f"area=[{p['min_area']},{p['max_area']}] "
-                      f"cloud={p['max_cloud_pct']}% morph=[k={p['morph_kernel']},o={p['morph_open_iter']},c={p['morph_close_iter']}] "
-                      f"skip={p['frame_skip']}")
+                      f"cloud={p['max_cloud_pct']}% morph=[k={p['morph_kernel']},o={p['morph_open_iter']},c={p['morph_close_iter']}]")
 
     except KeyboardInterrupt:
         pass

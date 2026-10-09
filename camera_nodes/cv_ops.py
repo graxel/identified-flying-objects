@@ -26,7 +26,6 @@ DEFAULT_CV_PARAMS = {
     "morph_kernel":       3,      # Structuring element size (odd, e.g. 1, 3, 5)
     "morph_open_iter":    1,      # Morphological open iterations (remove noise/speckles)
     "morph_close_iter":   2,      # Morphological close iterations (fill holes/bridge gaps)
-    "frame_skip":         0,      # 0=every frame, 1=every 2nd, 9=every 10th
 }
 
 

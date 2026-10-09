@@ -148,7 +148,10 @@ class CaptureAndExtractWorker:
         mono_now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         real_now = time.clock_gettime_ns(time.CLOCK_REALTIME)
         clock_offset_ns = real_now - mono_now
-        global_sensor_ts_ns = sensor_monotonic_ns + clock_offset_ns
+        if sensor_monotonic_ns is not None:
+            global_sensor_ts_ns = sensor_monotonic_ns + clock_offset_ns
+        else:
+            global_sensor_ts_ns = real_now
 
         return {
             "raw_monotonic_ts_ns": sensor_monotonic_ns,
@@ -177,14 +180,6 @@ class CaptureAndExtractWorker:
             capture_start_ns = time.perf_counter_ns()
             camera_mem, metadata = self.get_next_capture()
             capture_done_ns = time.perf_counter_ns()
-
-            # Frame skip: drop this capture immediately and move on.
-            # frame_skip=0 → every frame; frame_skip=1 → every 2nd; etc.
-            frame_skip = int(self.cv_params.get("frame_skip", 0))
-            if frame_skip > 0 and (self.shot_num % (frame_skip + 1) != 0):
-                camera_mem.release()
-                self.shot_num += 1
-                continue
 
             # 2. Patch extraction
             extraction_start_ns = time.perf_counter_ns()

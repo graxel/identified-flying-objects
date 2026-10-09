@@ -48,7 +48,7 @@ class TestWorkbenchPipeline(unittest.TestCase):
 
         state._param_pub = MockPub()
         state.update_cv_param("alpha_slow_x1000", 50)
-        state.update_cv_param("frame_skip", 1)
+        state.update_cv_param("min_area", 35)
         state.update_cv_param("morph_kernel", 5)
 
         self.assertEqual(len(sent_messages), 3)
@@ -56,7 +56,7 @@ class TestWorkbenchPipeline(unittest.TestCase):
         self.assertEqual(topic, b"PARAMS")
         payload = json.loads(payload_bytes.decode("utf-8"))
         self.assertAlmostEqual(payload["alpha_slow"], 0.05)
-        self.assertEqual(payload["frame_skip"], 1)
+        self.assertEqual(payload["min_area"], 35)
         self.assertEqual(payload["morph_kernel"], 5)
         self.assertEqual(payload["diff_thresh"], state.cv_params["diff_thresh"])
 

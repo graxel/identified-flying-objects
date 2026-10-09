@@ -14,15 +14,14 @@
   "min_solidity": 30,
   "max_aspect_ratio": 40,
   "cv_params": {
-    "alpha_slow_x1000": 20,
+    "alpha_slow_x1000": 50,
     "alpha_fast_x100": 20,
-    "diff_thresh": 20,
-    "min_area": 20,
-    "max_area": 5000,
-    "max_cloud_pct": 15,
-    "morph_kernel": 3,
-    "morph_open_iter": 1,
-    "morph_close_iter": 2,
-    "frame_skip": 0
+    "diff_thresh": 0,
+    "min_area": 35,
+    "max_area": 10000,
+    "max_cloud_pct": 100,
+    "morph_kernel": 5,
+    "morph_open_iter": 2,
+    "morph_close_iter": 2
   }
 }
