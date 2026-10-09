@@ -208,22 +208,55 @@ def network_worker(sock, frame_queue):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Central Node Workbench")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Remote host/IP (e.g. kalman or kalman's Tailscale IP). If omitted, workbench binds locally to 0.0.0.0.",
+    )
+    parser.add_argument(
+        "--stream-port",
+        type=int,
+        default=None,
+        help="Port for incoming camera stream (default: 8000 in bind mode, 8002 in proxy/connect mode)",
+    )
+    parser.add_argument(
+        "--param-port",
+        type=int,
+        default=None,
+        help="Port for pushing parameters (default: 8001 in bind mode, 8003 in proxy/connect mode)",
+    )
+    args = parser.parse_args()
+
     state = WorkbenchState()
 
-    host = "0.0.0.0"
-    port = 8000
     context = zmq.Context()
     sock = context.socket(zmq.SUB)
-    sock.bind(f"tcp://{host}:{port}")
     sock.setsockopt(zmq.SUBSCRIBE, b"IFOP")
 
-    # Reverse channel: push cv_ops params to all camera nodes (port 8001)
     param_pub = context.socket(zmq.PUB)
-    param_pub.bind("tcp://0.0.0.0:8001")
     state._param_pub = param_pub
 
-    print(f"Workbench ZMQ subscriber bound to tcp://{host}:{port}")
-    print(f"Workbench ZMQ param publisher bound to tcp://0.0.0.0:8001")
+    if args.host:
+        # Client mode: connect to intermediary proxy (e.g. kalman over Tailscale)
+        stream_port = args.stream_port if args.stream_port is not None else 8002
+        param_port = args.param_port if args.param_port is not None else 8003
+        sock.connect(f"tcp://{args.host}:{stream_port}")
+        param_pub.connect(f"tcp://{args.host}:{param_port}")
+        print(f"Workbench connected to Proxy at tcp://{args.host}:{stream_port} (Stream)")
+        print(f"Workbench connected to Proxy at tcp://{args.host}:{param_port} (Params)")
+    else:
+        # Local direct bind mode
+        stream_port = args.stream_port if args.stream_port is not None else 8000
+        param_port = args.param_port if args.param_port is not None else 8001
+        sock.bind(f"tcp://0.0.0.0:{stream_port}")
+        param_pub.bind(f"tcp://0.0.0.0:{param_port}")
+        print(f"Workbench ZMQ subscriber bound to tcp://0.0.0.0:{stream_port}")
+        print(f"Workbench ZMQ param publisher bound to tcp://0.0.0.0:{param_port}")
+
     print("Tip: press [C] after cameras connect to push current params (ZMQ slow-joiner).")
 
     frame_queue = queue.Queue(maxsize=400)

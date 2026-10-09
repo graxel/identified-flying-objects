@@ -148,10 +148,7 @@ class CaptureAndExtractWorker:
         mono_now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         real_now = time.clock_gettime_ns(time.CLOCK_REALTIME)
         clock_offset_ns = real_now - mono_now
-        if sensor_monotonic_ns is not None:
-            global_sensor_ts_ns = sensor_monotonic_ns + clock_offset_ns
-        else:
-            global_sensor_ts_ns = real_now
+        global_sensor_ts_ns = sensor_monotonic_ns + clock_offset_ns
 
         return {
             "raw_monotonic_ts_ns": sensor_monotonic_ns,

@@ -10,9 +10,8 @@ from process_frames import FrameProcessor
 from sender import NetworkSender
 
 SEND_LOG_DIR = "send_logs"
-# SEND_DEST = ("kalman.local", 8000)
-SEND_DEST = ("graxel.local", 8000)
-PARAM_SUB_DEST = ("graxel.local", 8001)  # workbench publishes cv_ops params on this port
+SEND_DEST = ("kalman.local", 8000)
+PARAM_SUB_DEST = ("kalman.local", 8001)  # workbench publishes cv_ops params on this port
 
 SEND_QUEUE_MAX = 32
 

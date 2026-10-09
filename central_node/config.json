@@ -14,9 +14,9 @@
   "min_solidity": 30,
   "max_aspect_ratio": 40,
   "cv_params": {
-    "alpha_slow_x1000": 50,
-    "alpha_fast_x100": 20,
-    "diff_thresh": 0,
+    "alpha_slow_x1000": 7,
+    "alpha_fast_x100": 36,
+    "diff_thresh": 2,
     "min_area": 35,
     "max_area": 10000,
     "max_cloud_pct": 100,

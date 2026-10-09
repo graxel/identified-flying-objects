@@ -1,0 +1,15 @@
+[Unit]
+Description=ZMQ Proxy Forwarder for Camera Stream and Params
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+WorkingDirectory=__WORKING_DIRECTORY__
+ExecStart=__UV_BIN__ run proxy.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
