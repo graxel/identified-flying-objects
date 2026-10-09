@@ -1,0 +1,16 @@
+{
+  "fast_weight": 75,
+  "slow_weight": 25,
+  "diff_mode": 3,
+  "blur_kernel": 0,
+  "thresh_val": 2,
+  "use_otsu": 0,
+  "skyline_cutoff": 0,
+  "morph_kernel": 0,
+  "morph_open_iter": 0,
+  "morph_close_iter": 0,
+  "min_area": 0,
+  "max_area": 732,
+  "min_solidity": 26,
+  "max_aspect_ratio": 40
+}

@@ -12,6 +12,7 @@ from sender import NetworkSender
 SEND_LOG_DIR = "send_logs"
 # SEND_DEST = ("kalman.local", 8000)
 SEND_DEST = ("graxel.local", 8000)
+PARAM_SUB_DEST = ("graxel.local", 8001)  # workbench publishes cv_ops params on this port
 
 SEND_QUEUE_MAX = 32
 
@@ -56,6 +57,7 @@ def main():
         camera_id=camera_id,
         core_id=1,
         realtime_priority=None,
+        param_sub_dest=PARAM_SUB_DEST,
     )
 
     frame_processor = FrameProcessor(

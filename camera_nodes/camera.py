@@ -1,12 +1,19 @@
 # camera.py
 
+import json
+import queue
+import time
+
+import zmq
 from picamera2 import Picamera2, MappedArray
 from libcamera import Transform
 
-import time
-import queue
-
-from cv_ops import extract_patches, perform_motion_differencing, process_motion_diffs
+from cv_ops import (
+    DEFAULT_CV_PARAMS,
+    extract_patches,
+    perform_motion_differencing,
+    process_motion_diffs,
+)
 from system_utils import try_pin_and_prioritize
 
 CONSOLE_LOG_INTERVAL = 10
@@ -88,6 +95,7 @@ class CaptureAndExtractWorker:
         camera_id=0,
         core_id=None,
         realtime_priority=None,
+        param_sub_dest=None,
     ):
         self.picam2 = picam2
         self.process_queue = process_queue
@@ -108,6 +116,19 @@ class CaptureAndExtractWorker:
         self.fps_frame_count = 0
         self.fps_window_start = time.monotonic()
         self.shot_num = 0
+
+        # Live-tunable cv_ops parameters; updated via NOBLOCK poll each frame
+        self.cv_params = DEFAULT_CV_PARAMS.copy()
+
+        # ZMQ SUB socket for receiving param pushes from the workbench.
+        # RCVHWM=4 discards stale updates so we only ever apply the latest.
+        self._param_sock = None
+        if param_sub_dest:
+            self._param_sock = zmq.Context.instance().socket(zmq.SUB)
+            self._param_sock.setsockopt(zmq.RCVHWM, 4)
+            self._param_sock.setsockopt(zmq.SUBSCRIBE, b"PARAMS")
+            host, port = param_sub_dest
+            self._param_sock.connect(f"tcp://{host}:{port}")
 
     def get_next_capture(self):
         camera_mem = self.picam2.capture_request()
@@ -140,10 +161,30 @@ class CaptureAndExtractWorker:
         try_pin_and_prioritize(self.core_id, self.realtime_priority)
 
         while True:
+            # Drain any pending param updates before blocking on the sensor.
+            # NOBLOCK recv costs ~1 µs on a miss — no threads, no scheduling impact.
+            if self._param_sock is not None:
+                while True:
+                    try:
+                        _, payload = self._param_sock.recv_multipart(flags=zmq.NOBLOCK)
+                        self.cv_params.update(json.loads(payload))
+                    except zmq.Again:
+                        break
+                    except Exception:
+                        break
+
             # 1. Camera capture
             capture_start_ns = time.perf_counter_ns()
             camera_mem, metadata = self.get_next_capture()
             capture_done_ns = time.perf_counter_ns()
+
+            # Frame skip: drop this capture immediately and move on.
+            # frame_skip=0 → every frame; frame_skip=1 → every 2nd; etc.
+            frame_skip = int(self.cv_params.get("frame_skip", 0))
+            if frame_skip > 0 and (self.shot_num % (frame_skip + 1) != 0):
+                camera_mem.release()
+                self.shot_num += 1
+                continue
 
             # 2. Patch extraction
             extraction_start_ns = time.perf_counter_ns()
@@ -152,15 +193,27 @@ class CaptureAndExtractWorker:
             diff_start_ns = time.perf_counter_ns()
             low_res_gray = self.get_low_res_image(camera_mem)
             slow_diff, self.slow_bg, fast_diff, self.fast_bg = \
-                perform_motion_differencing(low_res_gray, self.slow_bg, self.fast_bg)
+                perform_motion_differencing(low_res_gray, self.slow_bg, self.fast_bg, self.cv_params)
             diff_done_ns = time.perf_counter_ns()
 
             # 2b. Make motion boxes <- I fear this will take the longest; let's find out.
+            # 2b. Make motion boxes and pipeline diagnostics
             box_start_ns = time.perf_counter_ns()
             if slow_diff is not None and fast_diff is not None:
-                motion_boxes = process_motion_diffs(slow_diff, fast_diff, self.scale_x, self.scale_y, self.main_w, self.main_h)
+                motion_boxes, diag = process_motion_diffs(
+                    slow_diff, fast_diff,
+                    self.scale_x, self.scale_y,
+                    self.main_w, self.main_h,
+                    self.cv_params,
+                    return_diagnostics=True,
+                )
             else:
                 motion_boxes = {}
+                diag = {
+                    "combined_diff": None,
+                    "thresh_mask": None,
+                    "morphed_mask": None,
+                }
             box_done_ns = time.perf_counter_ns()
 
             # 2c. Extract patches from high-res frame
@@ -174,15 +227,30 @@ class CaptureAndExtractWorker:
             extraction_done_ns = time.perf_counter_ns()
 
             # 4. Gather everything in a dictionary
+            sensor_ts = self.get_sensor_timestamps(metadata)
+            frame_ts = dict(sensor_ts)
+            frame_ts["capture_start_ns"] = capture_start_ns
+            frame_ts["capture_done_ns"] = capture_done_ns
+            proc_times = {
+                "diff_time_ns": diff_done_ns - diff_start_ns,
+                "box_time_ns": box_done_ns - box_start_ns,
+                "patch_time_ns": patch_done_ns - patch_start_ns,
+                "extraction_time_ns": extraction_done_ns - extraction_start_ns,
+            }
+
             frame = {
                 "camera_id": self.camera_id,
                 "shot_id": f"frame_{self.shot_num:09d}",
                 "low_res_gray": low_res_gray,
                 "slow_diff": slow_diff,
                 "fast_diff": fast_diff,
+                "combined_diff": diag.get("combined_diff"),
+                "thresh_mask": diag.get("thresh_mask"),
+                "morphed_mask": diag.get("morphed_mask"),
                 "patches": patches,
                 "metadata": metadata,
-                "sensor_timestamps": self.get_sensor_timestamps(metadata),
+                "sensor_timestamps": sensor_ts,
+                "frame_timestamps": frame_ts,
                 "capture_timestamps": {
                     "capture_start_ns": capture_start_ns,
                     "capture_done_ns":  capture_done_ns,
@@ -195,6 +263,7 @@ class CaptureAndExtractWorker:
                     "patch_done_ns":  patch_done_ns,
                     "extraction_done_ns": extraction_done_ns,
                 },
+                "processing_times": proc_times,
             }
 
             # 5. Push dict onto the pack queue
@@ -215,6 +284,10 @@ class CaptureAndExtractWorker:
                 fps = self.fps_frame_count / elapsed if elapsed > 0 else 0.0
                 self.fps_window_start = now
                 self.fps_frame_count = 0
-                print(f"[Camera {self.camera_id}] Critical Path FPS: {fps:.1f} | Process Queue: {self.process_queue.qsize()}")
+                ext_ms = (extraction_done_ns - extraction_start_ns) / 1e6
+                diff_ms = (diff_done_ns - diff_start_ns) / 1e6
+                box_ms = (box_done_ns - box_start_ns) / 1e6
+                warn = " [WARN: >100ms!]" if ext_ms > 100.0 else ""
+                print(f"[Camera {self.camera_id}] FPS: {fps:.1f} | Extr: {ext_ms:.1f}ms (diff: {diff_ms:.1f}ms, box: {box_ms:.1f}ms) | Q: {self.process_queue.qsize()}{warn}")
 
 

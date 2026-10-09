@@ -4,14 +4,27 @@ import time
 import random
 import cv2
 import numpy as np
-from picamera2 import MappedArray
+try:
+    from picamera2 import MappedArray
+except ImportError:
+    class MappedArray:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
 
 
-ALPHA_SLOW = 0.02
-ALPHA_FAST = 0.2
-DIFF_THRESH = 20
-MIN_AREA = 20
-MAX_AREA = 5000
+DEFAULT_CV_PARAMS = {
+    "alpha_slow":         0.02,   # EMA weight for slow background
+    "alpha_fast":         0.2,    # EMA weight for fast background
+    "diff_thresh":        20,     # Threshold for motion mask (0-255)
+    "min_area":           20,     # Minimum contour area to keep (pixels)
+    "max_area":           5000,   # Maximum contour area to keep (pixels)
+    "max_cloud_fraction": 0.15,   # Reject blobs covering more than this fraction of the frame
+    "frame_skip":         0,      # 0=every frame, 1=every 2nd, 9=every 10th
+}
 
 
 def parse_ml_output(metadata, main_size, low_res_size):
@@ -68,35 +81,46 @@ def compute_ema_diff(frame, bg, alpha):
     return diff, bg
 
 
-MAX_CLOUD_FRACTION = 0.15  # reject blobs covering more than 15% of the frame
 
 
-def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h):
+
+def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h, params=None, return_diagnostics=False):
     """
     Combine slow and fast difference images, threshold, clean, filter, and
     extract bounding boxes mapped to the main coordinate space.
 
     Pipeline:
-      1. Threshold both diffs independently.
-      2. AND the masks — keeps only regions that differ from both backgrounds.
+      1. Combined diff: pixel-wise min of slow and fast diffs.
+      2. Threshold both diffs independently and bitwise-AND (binarized mask).
       3. Morphological cleanup (open to remove speckle, close to fill holes).
       4. Connected components -> filter by area and cloud fraction.
       5. Map surviving blobs to main-resolution bounding boxes.
     """
-    # Threshold both diffs
-    _, slow_mask = cv2.threshold(slow_diff, DIFF_THRESH, 255, cv2.THRESH_BINARY)
-    _, fast_mask = cv2.threshold(fast_diff, DIFF_THRESH, 255, cv2.THRESH_BINARY)
+    if params is None:
+        params = DEFAULT_CV_PARAMS
 
-    # AND: keep only regions that differ from both backgrounds.
-    # Clouds drift into slow_bg but stay in fast_bg, so they only trigger one mask.
+    diff_thresh        = params["diff_thresh"]
+    min_area           = params["min_area"]
+    max_area           = params["max_area"]
+    max_cloud_fraction = params["max_cloud_fraction"]
+
+    # 1. Combined diff
+    combined_diff = cv2.min(slow_diff, fast_diff)
+
+    # 2. Threshold both diffs
+    _, slow_mask = cv2.threshold(slow_diff, diff_thresh, 255, cv2.THRESH_BINARY)
+    _, fast_mask = cv2.threshold(fast_diff, diff_thresh, 255, cv2.THRESH_BINARY)
+
+    # AND: keep only regions that differ from both backgrounds (thresholded/binarized mask)
     candidate_mask = cv2.bitwise_and(slow_mask, fast_mask)
+    thresh_mask = candidate_mask.copy()
 
-    # Morphology cleanup
+    # 3. Morphology cleanup (topologically morphed result)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    morphed_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    contours, _ = cv2.findContours(candidate_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Pre-compute limits
     max_low_res_w = int(140 / scale_x) if scale_x != 0 else 140
@@ -108,13 +132,13 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h)
     idx = 0
     for contour in contours:
         area = cv2.contourArea(contour)
-        if area < MIN_AREA or area > MAX_AREA:
+        if area < min_area or area > max_area:
             continue
 
         x, y, w, h = cv2.boundingRect(contour)
 
         # Cloud fraction filter: reject blobs covering too much of the frame
-        if area / full_frame_area > MAX_CLOUD_FRACTION:
+        if area / full_frame_area > max_cloud_fraction:
             continue
 
         # Drop anything that would produce a patch larger than 140x140 in main space
@@ -135,16 +159,26 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h)
         ml_info[idx] = {"x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h}
         idx += 1
 
+    if return_diagnostics:
+        diag = {
+            "combined_diff": combined_diff,
+            "thresh_mask": thresh_mask,
+            "morphed_mask": morphed_mask,
+        }
+        return ml_info, diag
+
     return ml_info
 
 
-def perform_motion_differencing(frame, slow_bg, fast_bg): # , scale_x, scale_y, main_w, main_h):
+def perform_motion_differencing(frame, slow_bg, fast_bg, params=None):
     """
     Run EMA background subtraction on the low_res frame.
-    Returns bounding boxes mapped to the main coordinate space, diff duration, and updated slow_bg.
+    Returns slow_diff, updated slow_bg, fast_diff, updated fast_bg.
     """
-    slow_diff, slow_bg = compute_ema_diff(frame, slow_bg, alpha=ALPHA_SLOW)
-    fast_diff, fast_bg = compute_ema_diff(frame, fast_bg, alpha=ALPHA_FAST)
+    if params is None:
+        params = DEFAULT_CV_PARAMS
+    slow_diff, slow_bg = compute_ema_diff(frame, slow_bg, alpha=params["alpha_slow"])
+    fast_diff, fast_bg = compute_ema_diff(frame, fast_bg, alpha=params["alpha_fast"])
 
     return slow_diff, slow_bg, fast_diff, fast_bg
 

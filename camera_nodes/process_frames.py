@@ -40,25 +40,22 @@ class FrameProcessor:
                 # Check if interval has passed (then it's time to send another low_res frame)
                 send_low_res = (encode_time - self.last_low_res_encode_time) >= self.low_res_interval_sec
                 
-                # jpeg encode low_res and diffs
+                # jpeg encode low_res and diagnostic pipeline frames
                 if send_low_res:
                     low_res_gray = frame_data["low_res_gray"]
                     low_res_jpg = _encode_img(low_res_gray)
-                    slow_diff_jpg = _encode_img(frame_data.get("slow_diff"))
-                    fast_diff_jpg = _encode_img(frame_data.get("fast_diff"))
-                    # slow_bg_jpg = _encode_img(frame_data.get("slow_bg"))
-                    # fast_bg_jpg = _encode_img(frame_data.get("fast_bg"))
+                    combined_diff_jpg = _encode_img(frame_data.get("combined_diff"))
+                    thresh_mask_jpg = _encode_img(frame_data.get("thresh_mask"))
+                    morphed_mask_jpg = _encode_img(frame_data.get("morphed_mask"))
                     
                     self.last_low_res_encode_time = encode_time
                     low_res_shape = low_res_gray.shape
 
                 else:
                     low_res_jpg = None
-                    slow_diff_jpg = None
-                    fast_diff_jpg = None
-                    # slow_bg_jpg = None
-                    # fast_bg_jpg = None
-
+                    combined_diff_jpg = None
+                    thresh_mask_jpg = None
+                    morphed_mask_jpg = None
                     low_res_shape = None
                 
                 # 3. use camera calibration to convert patch coords to 3D ray
@@ -80,9 +77,9 @@ class FrameProcessor:
                     },
                     "step_durations_ms": {
                         "diff_ms": frame_data["processing_times"].get("diff_time_ns", 0) / 1e6,
-                        "bbox_ms": 0.0,
+                        "bbox_ms": frame_data["processing_times"].get("box_time_ns", 0) / 1e6,
                         "ml_train_ms": frame_data["processing_times"].get("ml_train_ns", 0) / 1e6,
-                        "extract_ms": 0.0,
+                        "extract_ms": frame_data["processing_times"].get("patch_time_ns", 0) / 1e6,
                         "pack_ms": 0.0,
                     },
                     "system": {
@@ -106,10 +103,9 @@ class FrameProcessor:
                         "sensor_ts_ns": frame_data["frame_timestamps"]["sensor_ts_ns"],
                         "low_res": low_res_jpg,
                         "low_res_shape": low_res_shape,
-                        "slow_diff": slow_diff_jpg,
-                        "fast_diff": fast_diff_jpg,
-                        # "slow_bg": slow_bg_jpg,
-                        # "fast_bg": fast_bg_jpg,
+                        "combined_diff": combined_diff_jpg,
+                        "thresh_mask": thresh_mask_jpg,
+                        "morphed_mask": morphed_mask_jpg,
                     }
                     try:
                         self.send_queue.put(send_frames_obj, block=False)

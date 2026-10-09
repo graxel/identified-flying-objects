@@ -122,6 +122,21 @@ class NetworkSender:
                         meta_bytes = json.dumps(meta).encode("utf-8")
                         self.sock.send_multipart([b"IFOP", meta_bytes, frame_obj["low_res"]])
 
+                    if frame_obj.get("combined_diff"):
+                        h, w = frame_obj["low_res_shape"][:2]
+                        meta = {"packet_type": 10, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                        self.sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["combined_diff"]])
+
+                    if frame_obj.get("thresh_mask"):
+                        h, w = frame_obj["low_res_shape"][:2]
+                        meta = {"packet_type": 11, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                        self.sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["thresh_mask"]])
+
+                    if frame_obj.get("morphed_mask"):
+                        h, w = frame_obj["low_res_shape"][:2]
+                        meta = {"packet_type": 12, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                        self.sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["morphed_mask"]])
+
                     if frame_obj.get("slow_diff"):
                         h, w = frame_obj["low_res_shape"][:2]
                         meta = {"packet_type": 5, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
