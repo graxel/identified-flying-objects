@@ -29,8 +29,6 @@ class FrameProcessor:
         shared_stats,
         camera_id,
         low_res_interval_sec=1.0,
-        ml_size=None,
-        ml_train_interval_sec=None,
     ):
         self.process_queue = process_queue
         self.send_queue = send_queue
@@ -87,7 +85,7 @@ class FrameProcessor:
                     "step_durations_ms": {
                         "diff_ms": frame_data["processing_times"].get("diff_time_ns", 0) / 1e6,
                         "bbox_ms": frame_data["processing_times"].get("box_time_ns", 0) / 1e6,
-                        "ml_train_ms": frame_data["processing_times"].get("ml_train_ns", 0) / 1e6,
+                        "ml_train_ms": 0.0,
                         "extract_ms": frame_data["processing_times"].get("patch_time_ns", 0) / 1e6,
                         "pack_ms": 0.0,
                     },

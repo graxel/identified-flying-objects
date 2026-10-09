@@ -18,8 +18,6 @@ SEND_QUEUE_MAX = 32
 
 MAIN_SIZE = (4056, 3040)
 LOW_RES_SIZE = (800, 600)
-ML_SIZE = (640, 480)
-ML_TRAIN_INTERVAL_SEC = 1.0
 LOW_RES_INTERVAL_SEC = 0.05
 HEARTBEAT_INTERVAL_SEC = 5.0
 
@@ -65,8 +63,6 @@ def main():
         send_queue=send_queue,
         shared_stats=shared_stats,
         camera_id=camera_id,
-        ml_size=ML_SIZE,
-        ml_train_interval_sec=ML_TRAIN_INTERVAL_SEC,
         low_res_interval_sec=LOW_RES_INTERVAL_SEC,
     )
 

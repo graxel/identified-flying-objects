@@ -132,6 +132,35 @@ class TestCVOps(unittest.TestCase):
         self.assertEqual(np.max(diag["morphed_mask"]), 255)
         self.assertEqual(len(boxes), 1)
 
+    def test_morphology_parameter_tuning(self):
+        slow_diff = np.zeros((self.h, self.w), dtype=np.uint8)
+        fast_diff = np.zeros((self.h, self.w), dtype=np.uint8)
+        # Small isolated noise speckle (2x2)
+        slow_diff[100:102, 100:102] = 50
+        fast_diff[100:102, 100:102] = 50
+
+        # With morph_open_iter=1 and 3x3 kernel, 2x2 speckle is eroded away
+        params_with_open = dict(DEFAULT_CV_PARAMS, min_area=1, morph_kernel=3, morph_open_iter=1, morph_close_iter=0)
+        _, diag_open = process_motion_diffs(
+            slow_diff, fast_diff,
+            self.scale_x, self.scale_y,
+            self.main_w, self.main_h,
+            params=params_with_open,
+            return_diagnostics=True,
+        )
+        self.assertEqual(np.max(diag_open["morphed_mask"]), 0)
+
+        # With morph_open_iter=0, speckle is not eroded away
+        params_no_open = dict(DEFAULT_CV_PARAMS, min_area=1, morph_kernel=3, morph_open_iter=0, morph_close_iter=0)
+        _, diag_no_open = process_motion_diffs(
+            slow_diff, fast_diff,
+            self.scale_x, self.scale_y,
+            self.main_w, self.main_h,
+            params=params_no_open,
+            return_diagnostics=True,
+        )
+        self.assertEqual(np.max(diag_no_open["morphed_mask"]), 255)
+
 
 if __name__ == "__main__":
     unittest.main()

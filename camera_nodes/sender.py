@@ -94,20 +94,6 @@ class NetworkSender:
                     camera_id = frame_obj["camera_id"]
                     sensor_ts_ns = frame_obj["sensor_ts_ns"]
 
-                    if frame_obj.get("ml_train"):
-                        h, w = frame_obj["ml_train_shape"][:2]
-                        meta = {
-                            "packet_type": 1,
-                            "camera_id": camera_id,
-                            "sensor_ts_ns": sensor_ts_ns,
-                            "x": 0,
-                            "y": 0,
-                            "w": w,
-                            "h": h,
-                        }
-                        meta_bytes = json.dumps(meta).encode("utf-8")
-                        self.sock.send_multipart([b"IFOP", meta_bytes, frame_obj["ml_train"]])
-
                     if frame_obj.get("low_res"):
                         h, w = frame_obj["low_res_shape"][:2]
                         meta = {

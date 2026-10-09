@@ -40,27 +40,47 @@ CV_PARAM_DEFAULTS = {
     "min_area":          20,   # minimum blob area (low-res pixels)
     "max_area":        5000,   # maximum blob area (low-res pixels)
     "max_cloud_pct":     15,   # cloud fraction filter (÷100 → 0.15)
+    "morph_kernel":       3,   # structuring element kernel size (1, 3, 5, 7, 9)
+    "morph_open_iter":    1,   # morphological open iterations (0 to 5)
+    "morph_close_iter":   2,   # morphological close iterations (0 to 5)
     "frame_skip":         0,   # 0=every frame, 1=every 2nd, …, 9=every 10th
 }
 
 
 def load_config():
+    """Loads transformation pipeline params and live cv_params from config.json."""
+    pipeline_params = DEFAULT_PARAMS.copy()
+    cv_params = CV_PARAM_DEFAULTS.copy()
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r") as f:
                 saved = json.load(f)
-                params = DEFAULT_PARAMS.copy()
-                params.update(saved)
-                return params
+                if isinstance(saved, dict):
+                    # If config has dedicated "cv_params" key
+                    if "cv_params" in saved and isinstance(saved["cv_params"], dict):
+                        cv_params.update(saved["cv_params"])
+                        # Remaining top-level keys belong to pipeline
+                        for k, v in saved.items():
+                            if k != "cv_params" and k in pipeline_params:
+                                pipeline_params[k] = v
+                    else:
+                        # Flat format or backward compatibility
+                        for k, v in saved.items():
+                            if k in cv_params:
+                                cv_params[k] = v
+                            elif k in pipeline_params:
+                                pipeline_params[k] = v
         except Exception as e:
             print(f"Error loading config.json: {e}")
-    return DEFAULT_PARAMS.copy()
+    return pipeline_params, cv_params
 
 
-def save_config(params):
+def save_config(pipeline_params, cv_params):
     try:
+        combined = dict(pipeline_params)
+        combined["cv_params"] = dict(cv_params)
         with open(CONFIG_PATH, "w") as f:
-            json.dump(params, f, indent=2)
+            json.dump(combined, f, indent=2)
     except Exception as e:
         print(f"Error saving config.json: {e}")
 
@@ -84,7 +104,7 @@ class CameraState:
 
 class WorkbenchState:
     def __init__(self):
-        self.params = load_config()
+        self.params, self.cv_params = load_config()
         self.pipeline = TransformationPipeline(self.params)
         self.paused = False
         self.recording = False
@@ -107,16 +127,16 @@ class WorkbenchState:
         self.last_fps_calc = time.time()
 
         # Live cv_ops params pushed to camera nodes via ZMQ
-        self.cv_params = CV_PARAM_DEFAULTS.copy()
         self._param_pub = None
 
     def update_param(self, key, val):
         self.params[key] = val
         self.pipeline.set_params(self.params)
-        save_config(self.params)
+        save_config(self.params, self.cv_params)
 
     def update_cv_param(self, key, val):
         self.cv_params[key] = val
+        save_config(self.params, self.cv_params)
         self._broadcast_cv_params()
 
     def _broadcast_cv_params(self):
@@ -130,6 +150,9 @@ class WorkbenchState:
             "min_area":           self.cv_params["min_area"],
             "max_area":           self.cv_params["max_area"],
             "max_cloud_fraction": self.cv_params["max_cloud_pct"] / 100.0,
+            "morph_kernel":       self.cv_params["morph_kernel"],
+            "morph_open_iter":    self.cv_params["morph_open_iter"],
+            "morph_close_iter":   self.cv_params["morph_close_iter"],
             "frame_skip":         self.cv_params["frame_skip"],
         }
         try:
@@ -214,7 +237,7 @@ def main():
 
     # Clean single control window for edge camera parameter tuning
     cv2.namedWindow(CTRL_WINDOW, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(CTRL_WINDOW, 360, 320)
+    cv2.resizeWindow(CTRL_WINDOW, 380, 420)
     cv2.moveWindow(CTRL_WINDOW, 1420, 50)
 
     def make_cv_tb_cb(key):
@@ -223,13 +246,19 @@ def main():
         return cb
 
     # Controls: Camera-side cv_ops params (pushed live to RPi camera nodes)
-    cv2.createTrackbar("α Slow ×1000",  CTRL_WINDOW, state.cv_params["alpha_slow_x1000"], 200,  make_cv_tb_cb("alpha_slow_x1000"))
-    cv2.createTrackbar("α Fast ×100",   CTRL_WINDOW, state.cv_params["alpha_fast_x100"],  100,  make_cv_tb_cb("alpha_fast_x100"))
-    cv2.createTrackbar("Diff Thresh",     CTRL_WINDOW, state.cv_params["diff_thresh"],       255,  make_cv_tb_cb("diff_thresh"))
-    cv2.createTrackbar("Min Area",        CTRL_WINDOW, state.cv_params["min_area"],          500,  make_cv_tb_cb("min_area"))
-    cv2.createTrackbar("Max Area",        CTRL_WINDOW, state.cv_params["max_area"],        10000,  make_cv_tb_cb("max_area"))
-    cv2.createTrackbar("Cloud Pct",       CTRL_WINDOW, state.cv_params["max_cloud_pct"],     100,  make_cv_tb_cb("max_cloud_pct"))
-    cv2.createTrackbar("Frame Skip",      CTRL_WINDOW, state.cv_params["frame_skip"],          9,  make_cv_tb_cb("frame_skip"))
+    cv2.createTrackbar("α Slow ×1000",  CTRL_WINDOW, state.cv_params["alpha_slow_x1000"], 200,   make_cv_tb_cb("alpha_slow_x1000"))
+    cv2.createTrackbar("α Fast ×100",   CTRL_WINDOW, state.cv_params["alpha_fast_x100"],  100,   make_cv_tb_cb("alpha_fast_x100"))
+    cv2.createTrackbar("Diff Thresh",     CTRL_WINDOW, state.cv_params["diff_thresh"],       255,   make_cv_tb_cb("diff_thresh"))
+    cv2.createTrackbar("Min Area",        CTRL_WINDOW, state.cv_params["min_area"],          500,   make_cv_tb_cb("min_area"))
+    cv2.createTrackbar("Max Area",        CTRL_WINDOW, state.cv_params["max_area"],        10000,   make_cv_tb_cb("max_area"))
+    cv2.createTrackbar("Cloud Pct",       CTRL_WINDOW, state.cv_params["max_cloud_pct"],     100,   make_cv_tb_cb("max_cloud_pct"))
+    cv2.createTrackbar("Morph Kernel",    CTRL_WINDOW, state.cv_params["morph_kernel"],         9,   make_cv_tb_cb("morph_kernel"))
+    cv2.createTrackbar("Morph Open",      CTRL_WINDOW, state.cv_params["morph_open_iter"],      5,   make_cv_tb_cb("morph_open_iter"))
+    cv2.createTrackbar("Morph Close",     CTRL_WINDOW, state.cv_params["morph_close_iter"],     5,   make_cv_tb_cb("morph_close_iter"))
+    cv2.createTrackbar("Frame Skip",      CTRL_WINDOW, state.cv_params["frame_skip"],          9,   make_cv_tb_cb("frame_skip"))
+
+    # Initial broadcast of loaded parameters
+    state._broadcast_cv_params()
 
     print("\n--- Workbench Controls ---")
     print(" [D]     : Toggle between 4-Camera Grid and Diagnostic Pipeline view")
@@ -379,7 +408,7 @@ def main():
                 p_tl = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 1: Low-Res + Detected Boxes ({len(t_cam.boxes)} objs)")
                 p_tr = prep_panel(t_cam.combined_diff, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 2: Combined Diff [min(slow, fast)]")
                 p_bl = prep_panel(t_cam.thresh_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 3: Binarized Mask (thresh = {state.cv_params['diff_thresh']})")
-                p_br = prep_panel(t_cam.morphed_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 4: Morphed Result (open + close)")
+                p_br = prep_panel(t_cam.morphed_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 4: Morphed (k={state.cv_params['morph_kernel']} open={state.cv_params['morph_open_iter']} close={state.cv_params['morph_close_iter']})")
 
             row1 = np.hstack([p_tl, p_tr])
             row2 = np.hstack([p_bl, p_br])
@@ -446,7 +475,8 @@ def main():
                 print(f"[Broadcast] cv_params sent — α_slow={p['alpha_slow_x1000']/1000:.3f} "
                       f"α_fast={p['alpha_fast_x100']/100:.2f} thresh={p['diff_thresh']} "
                       f"area=[{p['min_area']},{p['max_area']}] "
-                      f"cloud={p['max_cloud_pct']}% skip={p['frame_skip']}")
+                      f"cloud={p['max_cloud_pct']}% morph=[k={p['morph_kernel']},o={p['morph_open_iter']},c={p['morph_close_iter']}] "
+                      f"skip={p['frame_skip']}")
 
     except KeyboardInterrupt:
         pass

@@ -23,25 +23,11 @@ DEFAULT_CV_PARAMS = {
     "min_area":           20,     # Minimum contour area to keep (pixels)
     "max_area":           5000,   # Maximum contour area to keep (pixels)
     "max_cloud_fraction": 0.15,   # Reject blobs covering more than this fraction of the frame
+    "morph_kernel":       3,      # Structuring element size (odd, e.g. 1, 3, 5)
+    "morph_open_iter":    1,      # Morphological open iterations (remove noise/speckles)
+    "morph_close_iter":   2,      # Morphological close iterations (fill holes/bridge gaps)
     "frame_skip":         0,      # 0=every frame, 1=every 2nd, 9=every 10th
 }
-
-
-def parse_ml_output(metadata, main_size, low_res_size):
-    """Mock ML bounding box generator. Replace with real model inference."""
-    ml_info = {}
-    main_w, main_h = main_size
-    num_objects = random.randint(1, 10)
-    for i in range(num_objects):
-        r = (1 * random.random()) ** (1 / 3)
-        # Cap size to 140 to prevent exceeding UDP maximum packet size (~65KB)
-        raw_size = int(32 * int(4 / (r + 0.001)) / 4)
-        size = min(140, raw_size)
-        x = random.randint(0, main_w - size)
-        y = random.randint(0, main_h - size)
-        ml_info[i] = {"x": x, "y": y, "w": size, "h": size}
-    # print([patch['w'] for patch in ml_info.values()])
-    return ml_info
 
 
 def extract_patches(camera_mem, motion_boxes):
@@ -116,9 +102,22 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     thresh_mask = candidate_mask.copy()
 
     # 3. Morphology cleanup (topologically morphed result)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    morphed_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    k = int(params.get("morph_kernel", 3))
+    # Structuring element dimensions must be odd and positive
+    if k < 1:
+        k = 1
+    elif k % 2 == 0:
+        k += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+
+    open_iter = int(params.get("morph_open_iter", 1))
+    close_iter = int(params.get("morph_close_iter", 2))
+
+    morphed_mask = candidate_mask
+    if open_iter > 0:
+        morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+    if close_iter > 0:
+        morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
 
     contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -128,7 +127,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     frame_h, frame_w = slow_diff.shape[:2]
     full_frame_area = frame_h * frame_w
 
-    ml_info = {}
+    motion_boxes = {}
     idx = 0
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -156,7 +155,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         patch_w = min(patch_w, main_w - patch_x)
         patch_h = min(patch_h, main_h - patch_y)
 
-        ml_info[idx] = {"x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h}
+        motion_boxes[idx] = {"x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h}
         idx += 1
 
     if return_diagnostics:
@@ -165,9 +164,9 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
             "thresh_mask": thresh_mask,
             "morphed_mask": morphed_mask,
         }
-        return ml_info, diag
+        return motion_boxes, diag
 
-    return ml_info
+    return motion_boxes
 
 
 def perform_motion_differencing(frame, slow_bg, fast_bg, params=None):
