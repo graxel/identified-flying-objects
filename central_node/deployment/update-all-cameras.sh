@@ -16,7 +16,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 CAMERAS=(cam1 cam2 cam3 cam4)
-CAMERA_USER="node_user"
+CAMERA_USER="cameron"
 GIT_ROOT="$(git rev-parse --show-toplevel)"
 UPDATE_SCRIPT="${GIT_ROOT}/camera_nodes/deployment/update-camera-node.sh"
 TARGET_BRANCH="${1:-}"

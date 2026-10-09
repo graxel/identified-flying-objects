@@ -22,7 +22,16 @@ class FrameProcessor:
     Handles all processing steps after the camera memory has been released.
     Reads from process_queue and pushes to send_queue.
     """
-    def __init__(self, process_queue, send_queue, shared_stats, camera_id, low_res_interval_sec=1.0):
+    def __init__(
+        self,
+        process_queue,
+        send_queue,
+        shared_stats,
+        camera_id,
+        low_res_interval_sec=1.0,
+        ml_size=None,
+        ml_train_interval_sec=None,
+    ):
         self.process_queue = process_queue
         self.send_queue = send_queue
         self.shared_stats = shared_stats
