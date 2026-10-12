@@ -101,24 +101,27 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     thresh_mask = candidate_mask.copy()
 
     # 3. Morphology cleanup (topologically morphed result)
-    k = int(params.get("morph_kernel", 3))
-    # Structuring element dimensions must be odd and positive
-    if k < 1:
-        k = 1
-    elif k % 2 == 0:
-        k += 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    # Independent kernel sizes for open (speckle removal) and close (hole filling)
+    k_open = int(params.get("morph_open_kernel", params.get("morph_kernel", 3)))
+    if k_open < 1: k_open = 1
+    elif k_open % 2 == 0: k_open += 1
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (k_open, k_open))
+
+    k_close = int(params.get("morph_close_kernel", params.get("morph_kernel", 3)))
+    if k_close < 1: k_close = 1
+    elif k_close % 2 == 0: k_close += 1
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (k_close, k_close))
 
     open_iter = int(params.get("morph_open_iter", 1))
     close_iter = int(params.get("morph_close_iter", 2))
 
     opened_mask = candidate_mask
     if open_iter > 0:
-        opened_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+        opened_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel_open, iterations=open_iter)
 
     morphed_mask = opened_mask
     if close_iter > 0:
-        morphed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
+        morphed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_close, iterations=close_iter)
 
     contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -156,7 +159,10 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         patch_w = min(patch_w, main_w - patch_x)
         patch_h = min(patch_h, main_h - patch_y)
 
-        motion_boxes[idx] = {"x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h}
+        motion_boxes[idx] = {
+            "x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h,  # main-res patch coords
+            "lx": x, "ly": y, "lw": w, "lh": h,                        # low-res bbox coords
+        }
         idx += 1
 
     if return_diagnostics:

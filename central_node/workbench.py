@@ -34,13 +34,14 @@ GRID_LAYOUT = {
 
 # Integer-scaled defaults for trackbars (converted to floats before publishing)
 CV_PARAM_DEFAULTS = {
-    "alpha_slow_x1000": 20,    # ÷1000 → 0.020  EMA weight for slow background
-    "alpha_fast_x100":  20,    # ÷100  → 0.20   EMA weight for fast background
+    "alpha_slow_x1000":  20,    # ÷1000 → 0.020  EMA weight for slow background
+    "alpha_fast_x100":   20,    # ÷100  → 0.20   EMA weight for fast background
     "diff_thresh":       20,   # motion threshold 0–255
     "min_area":          20,   # minimum blob area (low-res pixels)
     "max_area":        5000,   # maximum blob area (low-res pixels)
     "max_cloud_pct":     15,   # cloud fraction filter (÷100 → 0.15)
-    "morph_kernel":       3,   # structuring element kernel size (1, 3, 5, 7, 9)
+    "morph_open_kernel":  3,   # open structuring element size (odd) – speckle removal
+    "morph_close_kernel":  7,   # close structuring element size (odd) – hole filling / blob growth
     "morph_open_iter":    1,   # morphological open iterations (0 to 5)
     "morph_close_iter":   2,   # morphological close iterations (0 to 5)
     "diff_gain":          2,   # visual gain multiplier for diff displays (1x, 2x, 3x, 4x)
@@ -98,7 +99,7 @@ class CameraState:
         self.slow_diff = np.zeros((600, 800), dtype=np.uint8)
         self.fast_diff = np.zeros((600, 800), dtype=np.uint8)
         self.telemetry = None  # (cap_ms, diff_ms, bbox_ms, ml_train_ms, extract_ms, pack_ms, send_ms, send_wall_time, cpu_temp_c, mem_used_pct, encoder_q_size, send_q_size)
-        self.boxes = []        # list of (x, y, w, h) in main-res coordinates
+        self.boxes = []        # list of (x, y, w, h) in low-res coordinates
         self.patches = []      # list of BGR patch images
         self.last_patch_time = 0.0
 
@@ -151,7 +152,8 @@ class WorkbenchState:
             "min_area":           self.cv_params["min_area"],
             "max_area":           self.cv_params["max_area"],
             "max_cloud_fraction": self.cv_params["max_cloud_pct"] / 100.0,
-            "morph_kernel":       self.cv_params["morph_kernel"],
+            "morph_open_kernel":  self.cv_params["morph_open_kernel"],
+            "morph_close_kernel": self.cv_params["morph_close_kernel"],
             "morph_open_iter":    self.cv_params["morph_open_iter"],
             "morph_close_iter":   self.cv_params["morph_close_iter"],
         }
@@ -178,6 +180,10 @@ def network_worker(sock, frame_queue):
             x, y = meta.get("x", 0), meta.get("y", 0)
             w = meta.get("w", 0)
             h = meta.get("h", 0)
+            lx = meta.get("lx", x)
+            ly = meta.get("ly", y)
+            lw = meta.get("lw", w)
+            lh = meta.get("lh", h)
 
             # Frames & intermediate diagnostics (JPEG grayscale)
             if ptype in (2, 5, 6, 10, 11, 12, 13):
@@ -191,7 +197,7 @@ def network_worker(sock, frame_queue):
                     try:
                         patch_rgb = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w, 3))
                         patch_bgr = cv2.cvtColor(patch_rgb, cv2.COLOR_RGB2BGR)
-                        frame_queue.put((cam_id, 0, x, y, (w, h, patch_bgr)))
+                        frame_queue.put((cam_id, 0, lx, ly, (lw, lh, patch_bgr)))
                     except Exception:
                         pass
 
@@ -275,7 +281,7 @@ def main():
 
     # Clean single control window for edge camera parameter tuning
     cv2.namedWindow(CTRL_WINDOW, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(CTRL_WINDOW, 380, 420)
+    cv2.resizeWindow(CTRL_WINDOW, 380, 455)
     cv2.moveWindow(CTRL_WINDOW, 1420, 50)
 
     def make_cv_tb_cb(key):
@@ -284,16 +290,17 @@ def main():
         return cb
 
     # Controls: Camera-side cv_ops params (pushed live to RPi camera nodes)
-    cv2.createTrackbar("α Slow ×1000",  CTRL_WINDOW, state.cv_params["alpha_slow_x1000"], 200,   make_cv_tb_cb("alpha_slow_x1000"))
-    cv2.createTrackbar("α Fast ×100",   CTRL_WINDOW, state.cv_params["alpha_fast_x100"],  100,   make_cv_tb_cb("alpha_fast_x100"))
-    cv2.createTrackbar("Diff Thresh",     CTRL_WINDOW, state.cv_params["diff_thresh"],       255,   make_cv_tb_cb("diff_thresh"))
-    cv2.createTrackbar("Min Area",        CTRL_WINDOW, state.cv_params["min_area"],          500,   make_cv_tb_cb("min_area"))
-    cv2.createTrackbar("Max Area",        CTRL_WINDOW, state.cv_params["max_area"],        10000,   make_cv_tb_cb("max_area"))
-    cv2.createTrackbar("Cloud Pct",       CTRL_WINDOW, state.cv_params["max_cloud_pct"],     100,   make_cv_tb_cb("max_cloud_pct"))
-    cv2.createTrackbar("Morph Kernel",    CTRL_WINDOW, state.cv_params["morph_kernel"],         9,   make_cv_tb_cb("morph_kernel"))
-    cv2.createTrackbar("Morph Open",      CTRL_WINDOW, state.cv_params["morph_open_iter"],      5,   make_cv_tb_cb("morph_open_iter"))
-    cv2.createTrackbar("Morph Close",     CTRL_WINDOW, state.cv_params["morph_close_iter"],     5,   make_cv_tb_cb("morph_close_iter"))
-    cv2.createTrackbar("Diff Gain (x)",   CTRL_WINDOW, state.cv_params.get("diff_gain", 2),     4,   make_cv_tb_cb("diff_gain"))
+    cv2.createTrackbar("Slow x1000",        CTRL_WINDOW, state.cv_params["alpha_slow_x1000"],   200,   make_cv_tb_cb("alpha_slow_x1000"))
+    cv2.createTrackbar("Fast x100",         CTRL_WINDOW, state.cv_params["alpha_fast_x100"],    100,   make_cv_tb_cb("alpha_fast_x100"))
+    cv2.createTrackbar("Diff Thresh",       CTRL_WINDOW, state.cv_params["diff_thresh"],        100,   make_cv_tb_cb("diff_thresh"))
+    cv2.createTrackbar("Min Area",          CTRL_WINDOW, state.cv_params["min_area"],           500,   make_cv_tb_cb("min_area"))
+    cv2.createTrackbar("Max Area",          CTRL_WINDOW, state.cv_params["max_area"],        100000,   make_cv_tb_cb("max_area"))
+    cv2.createTrackbar("Cloud Pct",         CTRL_WINDOW, state.cv_params["max_cloud_pct"],      100,   make_cv_tb_cb("max_cloud_pct"))
+    cv2.createTrackbar("Morph Open Kern",  CTRL_WINDOW, state.cv_params["morph_open_kernel"],    9,   make_cv_tb_cb("morph_open_kernel"))
+    cv2.createTrackbar("Morph Close Kern", CTRL_WINDOW, state.cv_params["morph_close_kernel"],   17,   make_cv_tb_cb("morph_close_kernel"))
+    cv2.createTrackbar("Morph Open",        CTRL_WINDOW, state.cv_params["morph_open_iter"],      9,   make_cv_tb_cb("morph_open_iter"))
+    cv2.createTrackbar("Morph Close",       CTRL_WINDOW, state.cv_params["morph_close_iter"],     9,   make_cv_tb_cb("morph_close_iter"))
+    cv2.createTrackbar("Diff Gain (x)",     CTRL_WINDOW, state.cv_params.get("diff_gain", 2),     7,   make_cv_tb_cb("diff_gain"))
 
     # Initial broadcast of loaded parameters
     state._broadcast_cv_params()
@@ -385,16 +392,19 @@ def main():
                     img = np.zeros((ph, pw), dtype=np.uint8)
                 colored = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if len(img.shape) == 2 else img.copy()
 
-                # Draw bounding boxes (scaled from 4056x3040 -> 800x600)
-                sx = pw / float(ORIG_W)
-                sy = ph / float(ORIG_H)
+                # Draw bounding boxes: low-res coords -> panel pixel coords
+                # low_res images are 800x600, displayed at panel size (pw x ph)
+                lr_w = cam.low_res.shape[1] if cam.low_res is not None and cam.low_res.size > 0 else 800
+                lr_h = cam.low_res.shape[0] if cam.low_res is not None and cam.low_res.size > 0 else 600
+                sx = pw / float(lr_w)
+                sy = ph / float(lr_h)
                 for idx, (bx, by, bw, bh) in enumerate(cam.boxes):
-                    lx = int(bx * sx)
-                    ly = int(by * sy)
-                    lw = max(4, int(bw * sx))
-                    lh = max(4, int(bh * sy))
-                    cv2.rectangle(colored, (lx, ly), (lx + lw, ly + lh), (0, 255, 0), 2)
-                    cv2.putText(colored, f"obj{idx+1} {bw}x{bh}", (lx, max(14, ly - 4)), font, 0.40, (0, 255, 0), 1)
+                    dlx = int(bx * sx)
+                    dly = int(by * sy)
+                    dlw = max(4, int(bw * sx))
+                    dlh = max(4, int(bh * sy))
+                    cv2.rectangle(colored, (dlx, dly), (dlx + dlw, dly + dlh), (0, 255, 0), 2)
+                    cv2.putText(colored, f"obj{idx+1} {bw}x{bh}", (dlx, max(14, dly - 4)), font, 0.40, (0, 255, 0), 1)
 
                 # Draw high-res patch thumbnails in top-left corner below the header
                 if cam.patches:
@@ -468,19 +478,36 @@ def main():
                 thresh_img = t_cam.thresh_mask if t_cam.thresh_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
                 # Stage 5 & 6: Morphology steps (from camera)
-                k = int(state.cv_params.get("morph_kernel", 3))
+                k_open  = int(state.cv_params.get("morph_open_kernel",  state.cv_params.get("morph_kernel", 3)))
+                k_close = int(state.cv_params.get("morph_close_kernel", state.cv_params.get("morph_kernel", 3)))
                 open_iter = int(state.cv_params.get("morph_open_iter", 1))
                 close_iter = int(state.cv_params.get("morph_close_iter", 2))
 
                 opened_img = t_cam.opened_mask if t_cam.opened_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
                 closed_img = t_cam.morphed_mask if t_cam.morphed_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
+                # Build final closed mask panel with detection box overlay
+                if closed_img is not None and closed_img.size > 0:
+                    closed_display = cv2.resize(closed_img, (pw, ph))
+                    closed_colored = cv2.cvtColor(closed_display, cv2.COLOR_GRAY2BGR) if len(closed_display.shape) == 2 else closed_display.copy()
+                else:
+                    closed_colored = np.zeros((ph, pw, 3), dtype=np.uint8)
+                _lr_w = t_cam.morphed_mask.shape[1] if t_cam.morphed_mask is not None and t_cam.morphed_mask.size > 0 else 800
+                _lr_h = t_cam.morphed_mask.shape[0] if t_cam.morphed_mask is not None and t_cam.morphed_mask.size > 0 else 600
+                _bsx = pw / float(_lr_w)
+                _bsy = ph / float(_lr_h)
+                for _i, (bx, by, bw, bh) in enumerate(t_cam.boxes):
+                    _dlx = int(bx * _bsx); _dly = int(by * _bsy)
+                    _dlw = max(4, int(bw * _bsx)); _dlh = max(4, int(bh * _bsy))
+                    cv2.rectangle(closed_colored, (_dlx, _dly), (_dlx + _dlw, _dly + _dlh), (0, 255, 0), 2)
+                    cv2.putText(closed_colored, f"obj{_i+1}", (_dlx, max(14, _dly - 4)), font, 0.40, (0, 255, 0), 1)
+
                 p1 = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | 1. Low-Res + Bounding Boxes ({len(t_cam.boxes)} objs)")
                 p2 = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | 2. Fast (Red) & Slow (Blue) Diffs ({gain}x gain)")
                 p3 = prep_panel(comb_diff_g, t_cam.cam_id, f"cam{t_cam.cam_id} | 3. Combined Diff [min(slow, fast)] ({gain}x gain)")
                 p4 = prep_panel(thresh_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 4. Thresholded (thresh = {thresh_val})")
-                p5 = prep_panel(opened_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 5. Morphed: After Open (k={k}, iter={open_iter})")
-                p6 = prep_panel(closed_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 6. Morphed: Final Close (k={k}, iter={close_iter})")
+                p5 = prep_panel(opened_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 5. After Open (k={k_open}, iter={open_iter})")
+                p6 = prep_panel(closed_colored, t_cam.cam_id, f"cam{t_cam.cam_id} | 6. Final Close (k={k_close}, iter={close_iter}) — {len(t_cam.boxes)} objs")
 
                 row1 = np.hstack([p1, p2, p3])
                 row2 = np.hstack([p4, p5, p6])

@@ -53,6 +53,10 @@ class NetworkSender:
                             "y": patch["y"],
                             "w": patch["w"],
                             "h": patch["h"],
+                            "lx": patch.get("lx", patch["x"]),
+                            "ly": patch.get("ly", patch["y"]),
+                            "lw": patch.get("lw", patch["w"]),
+                            "lh": patch.get("lh", patch["h"]),
                         }
                         meta_bytes = json.dumps(meta).encode("utf-8")
                         self.sock.send_multipart([b"IFOP", meta_bytes, patch["px"]])
