@@ -112,11 +112,13 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     open_iter = int(params.get("morph_open_iter", 1))
     close_iter = int(params.get("morph_close_iter", 2))
 
-    morphed_mask = candidate_mask
+    opened_mask = candidate_mask
     if open_iter > 0:
-        morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+        opened_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+
+    morphed_mask = opened_mask
     if close_iter > 0:
-        morphed_mask = cv2.morphologyEx(morphed_mask, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
+        morphed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
 
     contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -161,6 +163,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         diag = {
             "combined_diff": combined_diff,
             "thresh_mask": thresh_mask,
+            "opened_mask": opened_mask,
             "morphed_mask": morphed_mask,
         }
         return motion_boxes, diag

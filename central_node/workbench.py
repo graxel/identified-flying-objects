@@ -93,6 +93,7 @@ class CameraState:
         self.low_res = np.zeros((600, 800), dtype=np.uint8)
         self.combined_diff = np.zeros((600, 800), dtype=np.uint8)
         self.thresh_mask = np.zeros((600, 800), dtype=np.uint8)
+        self.opened_mask = np.zeros((600, 800), dtype=np.uint8)
         self.morphed_mask = np.zeros((600, 800), dtype=np.uint8)
         self.slow_diff = np.zeros((600, 800), dtype=np.uint8)
         self.fast_diff = np.zeros((600, 800), dtype=np.uint8)
@@ -179,7 +180,7 @@ def network_worker(sock, frame_queue):
             h = meta.get("h", 0)
 
             # Frames & intermediate diagnostics (JPEG grayscale)
-            if ptype in (2, 5, 6, 10, 11, 12):
+            if ptype in (2, 5, 6, 10, 11, 12, 13):
                 frame_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
                 if frame_decoded is not None:
                     frame_queue.put((cam_id, ptype, x, y, frame_decoded))
@@ -265,7 +266,12 @@ def main():
     net_thread.start()
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(WINDOW_NAME, 1400, 900)
+    try:
+        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+    except Exception:
+        pass
+    cv2.resizeWindow(WINDOW_NAME, 1920, 1080)
 
     # Clean single control window for edge camera parameter tuning
     cv2.namedWindow(CTRL_WINDOW, cv2.WINDOW_NORMAL)
@@ -324,6 +330,8 @@ def main():
                             cam.combined_diff = frame
                         elif ptype == 11:
                             cam.thresh_mask = frame
+                        elif ptype == 13:
+                            cam.opened_mask = frame
                         elif ptype == 12:
                             cam.morphed_mask = frame
                         elif ptype == 5:
@@ -388,19 +396,19 @@ def main():
                     cv2.rectangle(colored, (lx, ly), (lx + lw, ly + lh), (0, 255, 0), 2)
                     cv2.putText(colored, f"obj{idx+1} {bw}x{bh}", (lx, max(14, ly - 4)), font, 0.40, (0, 255, 0), 1)
 
-                # Draw high-res patch thumbnails in bottom-right corner
+                # Draw high-res patch thumbnails in top-left corner below the header
                 if cam.patches:
                     thumb_size = 56
                     pad = 4
-                    start_x = colored.shape[1] - pad
-                    y_pos = colored.shape[0] - thumb_size - pad
+                    start_x = pad
+                    y_pos = 30  # just below the header bar (y=26)
                     for p_img in reversed(cam.patches[-4:]):
-                        start_x -= (thumb_size + pad)
-                        if start_x < 0:
+                        if start_x + thumb_size > colored.shape[1]:
                             break
                         thumb = cv2.resize(p_img, (thumb_size, thumb_size))
                         colored[y_pos:y_pos+thumb_size, start_x:start_x+thumb_size] = thumb
                         cv2.rectangle(colored, (start_x, y_pos), (start_x + thumb_size, y_pos + thumb_size), (0, 255, 0), 1)
+                        start_x += (thumb_size + pad)
 
                 return colored
 
@@ -448,21 +456,40 @@ def main():
                 # OpenCV BGR: B = slow_g, G = 0, R = fast_g
                 dual_overlay = cv2.merge([slow_g, green_ch, fast_g])
 
-                # Stage 2b: Combined diff in grayscale (min of slow and fast, with gain)
+                # Stage 3: Combined diff in grayscale (min of slow and fast, with gain)
                 if t_cam.slow_diff is not None and t_cam.fast_diff is not None:
                     comb_diff = cv2.min(t_cam.slow_diff, t_cam.fast_diff)
                 else:
                     comb_diff = t_cam.combined_diff
                 comb_diff_g = cv2.convertScaleAbs(comb_diff, alpha=gain) if comb_diff is not None else np.zeros((ph, pw), dtype=np.uint8)
 
-                p_tl = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 1: Low-Res + Detected Boxes ({len(t_cam.boxes)} objs)")
-                p_tr = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 2: Diff Overlay [Fast=Red, Slow=Blue] ({gain}x gain)")
-                p_bl = prep_panel(comb_diff_g, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 3: Combined Diff [min(slow, fast)] ({gain}x gain)")
-                p_br = prep_panel(t_cam.morphed_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 4: Morphed Mask (thresh = {state.cv_params['diff_thresh']})")
+                # Stage 4: Thresholded mask (from camera)
+                thresh_val = state.cv_params.get("diff_thresh", 20)
+                thresh_img = t_cam.thresh_mask if t_cam.thresh_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
-            row1 = np.hstack([p_tl, p_tr])
-            row2 = np.hstack([p_bl, p_br])
-            canvas = np.vstack([row1, row2])
+                # Stage 5 & 6: Morphology steps (from camera)
+                k = int(state.cv_params.get("morph_kernel", 3))
+                open_iter = int(state.cv_params.get("morph_open_iter", 1))
+                close_iter = int(state.cv_params.get("morph_close_iter", 2))
+
+                opened_img = t_cam.opened_mask if t_cam.opened_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
+                closed_img = t_cam.morphed_mask if t_cam.morphed_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
+
+                p1 = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | 1. Low-Res + Bounding Boxes ({len(t_cam.boxes)} objs)")
+                p2 = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | 2. Fast (Red) & Slow (Blue) Diffs ({gain}x gain)")
+                p3 = prep_panel(comb_diff_g, t_cam.cam_id, f"cam{t_cam.cam_id} | 3. Combined Diff [min(slow, fast)] ({gain}x gain)")
+                p4 = prep_panel(thresh_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 4. Thresholded (thresh = {thresh_val})")
+                p5 = prep_panel(opened_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 5. Morphed: After Open (k={k}, iter={open_iter})")
+                p6 = prep_panel(closed_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 6. Morphed: Final Close (k={k}, iter={close_iter})")
+
+                row1 = np.hstack([p1, p2, p3])
+                row2 = np.hstack([p4, p5, p6])
+                canvas = np.vstack([row1, row2])
+
+            if state.view_mode == "grid":
+                row1 = np.hstack([p_tl, p_tr])
+                row2 = np.hstack([p_bl, p_br])
+                canvas = np.vstack([row1, row2])
 
             # FPS counter
             state.frame_count += 1

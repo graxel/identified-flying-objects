@@ -204,6 +204,7 @@ class CaptureAndExtractWorker:
                 diag = {
                     "combined_diff": None,
                     "thresh_mask": None,
+                    "opened_mask": None,
                     "morphed_mask": None,
                 }
             box_done_ns = time.perf_counter_ns()
@@ -238,6 +239,7 @@ class CaptureAndExtractWorker:
                 "fast_diff": fast_diff,
                 "combined_diff": diag.get("combined_diff"),
                 "thresh_mask": diag.get("thresh_mask"),
+                "opened_mask": diag.get("opened_mask"),
                 "morphed_mask": diag.get("morphed_mask"),
                 "patches": patches,
                 "metadata": metadata,

@@ -118,6 +118,11 @@ class NetworkSender:
                         meta = {"packet_type": 11, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
                         self.sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["thresh_mask"]])
 
+                    if frame_obj.get("opened_mask"):
+                        h, w = frame_obj["low_res_shape"][:2]
+                        meta = {"packet_type": 13, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
+                        self.sock.send_multipart([b"IFOP", json.dumps(meta).encode("utf-8"), frame_obj["opened_mask"]])
+
                     if frame_obj.get("morphed_mask"):
                         h, w = frame_obj["low_res_shape"][:2]
                         meta = {"packet_type": 12, "camera_id": camera_id, "sensor_ts_ns": sensor_ts_ns, "x": 0, "y": 0, "w": w, "h": h}
