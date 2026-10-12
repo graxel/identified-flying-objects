@@ -25,6 +25,8 @@ ORIG_W, ORIG_H = 4056, 3040
 #   Top-Left: cam3     Top-Right: cam4
 #   Bot-Left: cam2     Bot-Right: cam1
 CAMERA_IDS = [1, 2, 3, 4]
+MAIN_W = 4056   # main-res (high-res) sensor width
+MAIN_H = 3040   # main-res (high-res) sensor height
 GRID_LAYOUT = {
     "top_left": 3,
     "top_right": 4,
@@ -99,7 +101,7 @@ class CameraState:
         self.slow_diff = np.zeros((600, 800), dtype=np.uint8)
         self.fast_diff = np.zeros((600, 800), dtype=np.uint8)
         self.telemetry = None  # (cap_ms, diff_ms, bbox_ms, ml_train_ms, extract_ms, pack_ms, send_ms, send_wall_time, cpu_temp_c, mem_used_pct, encoder_q_size, send_q_size)
-        self.boxes = []        # list of (x, y, w, h) in low-res coordinates
+        self.boxes = []        # list of (cx, cy, w, h) in main-res coordinates
         self.patches = []      # list of BGR patch images
         self.last_patch_time = 0.0
 
@@ -177,27 +179,24 @@ def network_worker(sock, frame_queue):
             meta = json.loads(meta_bytes.decode('utf-8'))
             ptype = meta["packet_type"]
             cam_id = meta.get("camera_id", 0)
-            x, y = meta.get("x", 0), meta.get("y", 0)
             w = meta.get("w", 0)
             h = meta.get("h", 0)
-            lx = meta.get("lx", x)
-            ly = meta.get("ly", y)
-            lw = meta.get("lw", w)
-            lh = meta.get("lh", h)
 
             # Frames & intermediate diagnostics (JPEG grayscale)
             if ptype in (2, 5, 6, 10, 11, 12, 13):
                 frame_decoded = cv2.imdecode(np.frombuffer(px_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
                 if frame_decoded is not None:
-                    frame_queue.put((cam_id, ptype, x, y, frame_decoded))
+                    frame_queue.put((cam_id, ptype, 0, 0, frame_decoded))
 
-            # Patches & Bounding Boxes
+            # Patches & Bounding Boxes (main-res cx/cy/w/h)
             elif ptype == 0:
+                cx = meta.get("cx", 0)
+                cy = meta.get("cy", 0)
                 if w > 0 and h > 0 and len(px_bytes) == w * h * 3:
                     try:
                         patch_rgb = np.frombuffer(px_bytes, dtype=np.uint8).reshape((h, w, 3))
                         patch_bgr = cv2.cvtColor(patch_rgb, cv2.COLOR_RGB2BGR)
-                        frame_queue.put((cam_id, 0, lx, ly, (lw, lh, patch_bgr)))
+                        frame_queue.put((cam_id, 0, 0, 0, (cx, cy, w, h, patch_bgr)))
                     except Exception:
                         pass
 
@@ -289,12 +288,12 @@ def main():
     cv2.createTrackbar("Fast x100",         CTRL_WINDOW, state.cv_params["alpha_fast_x100"],    100,   make_cv_tb_cb("alpha_fast_x100"))
     cv2.createTrackbar("Diff Thresh",       CTRL_WINDOW, state.cv_params["diff_thresh"],        100,   make_cv_tb_cb("diff_thresh"))
     cv2.createTrackbar("Min Area",          CTRL_WINDOW, state.cv_params["min_area"],           500,   make_cv_tb_cb("min_area"))
-    cv2.createTrackbar("Max Area",          CTRL_WINDOW, state.cv_params["max_area"],        100000,   make_cv_tb_cb("max_area"))
+    cv2.createTrackbar("Max Area",          CTRL_WINDOW, state.cv_params["max_area"],       1000000,   make_cv_tb_cb("max_area"))
     cv2.createTrackbar("Cloud Pct",         CTRL_WINDOW, state.cv_params["max_cloud_pct"],      100,   make_cv_tb_cb("max_cloud_pct"))
-    cv2.createTrackbar("Erode Kern",        CTRL_WINDOW, state.cv_params["erode_kernel"],    9,   make_cv_tb_cb("erode_kernel"))
-    cv2.createTrackbar("Erode Iters",       CTRL_WINDOW, state.cv_params["erode_iter"],       9,   make_cv_tb_cb("erode_iter"))
-    cv2.createTrackbar("Dilate Kern",       CTRL_WINDOW, state.cv_params["dilate_kernel"],   17,   make_cv_tb_cb("dilate_kernel"))
-    cv2.createTrackbar("Dilate Iters",      CTRL_WINDOW, state.cv_params["dilate_iter"],      9,   make_cv_tb_cb("dilate_iter"))
+    cv2.createTrackbar("Erode Kern",        CTRL_WINDOW, state.cv_params["erode_kernel"],         9,   make_cv_tb_cb("erode_kernel"))
+    cv2.createTrackbar("Erode Iters",       CTRL_WINDOW, state.cv_params["erode_iter"],           9,   make_cv_tb_cb("erode_iter"))
+    cv2.createTrackbar("Dilate Kern",       CTRL_WINDOW, state.cv_params["dilate_kernel"],       17,   make_cv_tb_cb("dilate_kernel"))
+    cv2.createTrackbar("Dilate Iters",      CTRL_WINDOW, state.cv_params["dilate_iter"],          9,   make_cv_tb_cb("dilate_iter"))
     cv2.createTrackbar("Diff Gain (x)",     CTRL_WINDOW, state.cv_params.get("diff_gain", 2),     7,   make_cv_tb_cb("diff_gain"))
 
     # Initial broadcast of loaded parameters
@@ -343,12 +342,12 @@ def main():
                         elif ptype == 4:
                             cam.telemetry = frame
                         elif ptype == 0:
-                            w_box, h_box, patch_bgr = frame
+                            cx, cy, w_box, h_box, patch_bgr = frame
                             if now - cam.last_patch_time > 0.35:
                                 cam.boxes.clear()
                                 cam.patches.clear()
                                 cam.last_patch_time = now
-                            cam.boxes.append((x, y, w_box, h_box))
+                            cam.boxes.append((cx, cy, w_box, h_box))
                             cam.patches.append(patch_bgr)
 
                     except queue.Empty:
@@ -381,39 +380,51 @@ def main():
             pw, ph = 800, 600
 
             def render_cam_view(cam):
-                """Annotates low_res with camera-detected bounding boxes and patch thumbnails."""
+                """Annotates low_res with green bounding boxes and superimposed patches.
+
+                Boxes and patches are in main-res (cx, cy, w, h) coordinates.
+                They are scaled to the panel display area (pw x ph) using the
+                known main resolution (cam.main_w x cam.main_h).
+                """
                 img = cam.low_res
                 if img is None or img.size == 0:
                     img = np.zeros((ph, pw), dtype=np.uint8)
                 colored = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if len(img.shape) == 2 else img.copy()
+                # Resize low_res to panel size first
+                colored = cv2.resize(colored, (pw, ph))
 
-                # Draw bounding boxes: low-res coords -> panel pixel coords
-                # low_res images are 800x600, displayed at panel size (pw x ph)
-                lr_w = cam.low_res.shape[1] if cam.low_res is not None and cam.low_res.size > 0 else 800
-                lr_h = cam.low_res.shape[0] if cam.low_res is not None and cam.low_res.size > 0 else 600
-                sx = pw / float(lr_w)
-                sy = ph / float(lr_h)
-                for idx, (bx, by, bw, bh) in enumerate(cam.boxes):
-                    dlx = int(bx * sx)
-                    dly = int(by * sy)
-                    dlw = max(4, int(bw * sx))
-                    dlh = max(4, int(bh * sy))
-                    cv2.rectangle(colored, (dlx, dly), (dlx + dlw, dly + dlh), (0, 255, 0), 2)
-                    cv2.putText(colored, f"obj{idx+1} {bw}x{bh}", (dlx, max(14, dly - 4)), font, 0.40, (0, 255, 0), 1)
+                # Scale factor from main-res to panel
+                sx = pw / float(MAIN_W)
+                sy = ph / float(MAIN_H)
 
-                # Draw high-res patch thumbnails in top-left corner below the header
-                if cam.patches:
-                    thumb_size = 56
-                    pad = 4
-                    start_x = pad
-                    y_pos = 30  # just below the header bar (y=26)
-                    for p_img in reversed(cam.patches[-4:]):
-                        if start_x + thumb_size > colored.shape[1]:
-                            break
-                        thumb = cv2.resize(p_img, (thumb_size, thumb_size))
-                        colored[y_pos:y_pos+thumb_size, start_x:start_x+thumb_size] = thumb
-                        cv2.rectangle(colored, (start_x, y_pos), (start_x + thumb_size, y_pos + thumb_size), (0, 255, 0), 1)
-                        start_x += (thumb_size + pad)
+                # Superimpose patches at their correct positions
+                for idx, (bcx, bcy, bw, bh) in enumerate(cam.boxes):
+                    # Box top-left in panel coords
+                    tl_x = int((bcx - bw / 2) * sx)
+                    tl_y = int((bcy - bh / 2) * sy)
+                    box_pw = max(4, int(bw * sx))
+                    box_ph = max(4, int(bh * sy))
+
+                    # Superimpose the actual high-res patch at the box location
+                    if idx < len(cam.patches):
+                        patch_img = cam.patches[idx]
+                        if patch_img is not None and patch_img.size > 0:
+                            resized_patch = cv2.resize(patch_img, (box_pw, box_ph))
+                            # Clamp to canvas
+                            y1 = max(0, tl_y)
+                            y2 = min(ph, tl_y + box_ph)
+                            x1 = max(0, tl_x)
+                            x2 = min(pw, tl_x + box_pw)
+                            py1 = y1 - tl_y
+                            py2 = py1 + (y2 - y1)
+                            px1 = x1 - tl_x
+                            px2 = px1 + (x2 - x1)
+                            if y2 > y1 and x2 > x1:
+                                colored[y1:y2, x1:x2] = resized_patch[py1:py2, px1:px2]
+
+                    # Draw green bounding box
+                    cv2.rectangle(colored, (tl_x, tl_y), (tl_x + box_pw, tl_y + box_ph), (0, 255, 0), 2)
+                    cv2.putText(colored, f"obj{idx+1} ({bcx},{bcy})", (tl_x, max(14, tl_y - 4)), font, 0.40, (0, 255, 0), 1)
 
                 return colored
 
@@ -481,21 +492,21 @@ def main():
                 eroded_img = t_cam.eroded_mask if t_cam.eroded_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
                 closed_img = t_cam.morphed_mask if t_cam.morphed_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
-                # Build final closed mask panel with detection box overlay
+                # Build final dilated mask panel with detection box overlay
                 if closed_img is not None and closed_img.size > 0:
                     closed_display = cv2.resize(closed_img, (pw, ph))
                     closed_colored = cv2.cvtColor(closed_display, cv2.COLOR_GRAY2BGR) if len(closed_display.shape) == 2 else closed_display.copy()
                 else:
                     closed_colored = np.zeros((ph, pw, 3), dtype=np.uint8)
-                _lr_w = t_cam.morphed_mask.shape[1] if t_cam.morphed_mask is not None and t_cam.morphed_mask.size > 0 else 800
-                _lr_h = t_cam.morphed_mask.shape[0] if t_cam.morphed_mask is not None and t_cam.morphed_mask.size > 0 else 600
-                _bsx = pw / float(_lr_w)
-                _bsy = ph / float(_lr_h)
-                for _i, (bx, by, bw, bh) in enumerate(t_cam.boxes):
-                    _dlx = int(bx * _bsx); _dly = int(by * _bsy)
-                    _dlw = max(4, int(bw * _bsx)); _dlh = max(4, int(bh * _bsy))
-                    cv2.rectangle(closed_colored, (_dlx, _dly), (_dlx + _dlw, _dly + _dlh), (0, 255, 0), 2)
-                    cv2.putText(closed_colored, f"obj{_i+1}", (_dlx, max(14, _dly - 4)), font, 0.40, (0, 255, 0), 1)
+                _sx = pw / float(MAIN_W)
+                _sy = ph / float(MAIN_H)
+                for _i, (bcx, bcy, bw, bh) in enumerate(t_cam.boxes):
+                    _tl_x = int((bcx - bw / 2) * _sx)
+                    _tl_y = int((bcy - bh / 2) * _sy)
+                    _bpw = max(4, int(bw * _sx))
+                    _bph = max(4, int(bh * _sy))
+                    cv2.rectangle(closed_colored, (_tl_x, _tl_y), (_tl_x + _bpw, _tl_y + _bph), (0, 255, 0), 2)
+                    cv2.putText(closed_colored, f"obj{_i+1}", (_tl_x, max(14, _tl_y - 4)), font, 0.40, (0, 255, 0), 1)
 
                 p1 = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | 1. Low-Res + Bounding Boxes ({len(t_cam.boxes)} objs)")
                 p2 = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | 2. Fast (Red) & Slow (Blue) Diffs ({gain}x gain)")

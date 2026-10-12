@@ -33,10 +33,7 @@ DEFAULT_CV_PARAMS = {
 def extract_patches(camera_mem, motion_boxes):
     """Slice patches out of the high-res frame while the camera request is alive.
 
-    Each motion_box must contain:
-      cx, cy  — patch center in main-res coordinates
-      w, h    — patch size in main-res pixels
-      lx, ly, lw, lh  — contour bounding rect in low-res coordinates (used for green box display)
+    Each motion_box contains cx, cy (center) and w, h (size) in main-res pixels.
     """
     with MappedArray(camera_mem, "main") as m:
         patches = []
@@ -47,14 +44,10 @@ def extract_patches(camera_mem, motion_boxes):
             y0 = cy - h // 2
             patches.append({
                 "source": src,
-                "x": cx,
-                "y": cy,
+                "cx": cx,
+                "cy": cy,
                 "w": w,
                 "h": h,
-                "lx": dims["lx"],
-                "ly": dims["ly"],
-                "lw": dims["lw"],
-                "lh": dims["lh"],
                 "px": m.array[y0:y0 + h, x0:x0 + w].copy().tobytes(),
             })
         return patches
@@ -139,8 +132,6 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Pre-compute limits
-    max_low_res_w = int(140 / scale_x) if scale_x != 0 else 140
-    max_low_res_h = int(140 / scale_y) if scale_y != 0 else 140
     frame_h, frame_w = slow_diff.shape[:2]
     full_frame_area = frame_h * frame_w
 
@@ -157,9 +148,6 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         if area / full_frame_area > max_cloud_fraction:
             continue
 
-        # Drop anything that would produce a patch larger than 140x140 in main space
-        if w > max_low_res_w or h > max_low_res_h:
-            continue
 
         # Map contour center to main coordinate space
         patch_w = int(w * scale_x)  # guaranteed <= 140
@@ -171,8 +159,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         cy = max(patch_h // 2, min(cy, main_h - patch_h // 2))
 
         motion_boxes[idx] = {
-            "cx": cx, "cy": cy, "w": patch_w, "h": patch_h,  # main-res: center + size
-            "lx": x, "ly": y, "lw": w, "lh": h,               # low-res bbox coords
+            "cx": cx, "cy": cy, "w": patch_w, "h": patch_h,
         }
         idx += 1
 

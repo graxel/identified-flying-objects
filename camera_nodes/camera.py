@@ -204,7 +204,7 @@ class CaptureAndExtractWorker:
                 diag = {
                     "combined_diff": None,
                     "thresh_mask": None,
-                    "opened_mask": None,
+                    "eroded_mask": None,
                     "morphed_mask": None,
                 }
             box_done_ns = time.perf_counter_ns()

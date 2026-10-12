@@ -49,14 +49,10 @@ class NetworkSender:
                             "packet_type": 0,
                             "camera_id": camera_id,
                             "sensor_ts_ns": sensor_ts_ns,
-                            "x": patch["x"],
-                            "y": patch["y"],
+                            "cx": patch["cx"],
+                            "cy": patch["cy"],
                             "w": patch["w"],
                             "h": patch["h"],
-                            "lx": patch.get("lx", patch["x"]),
-                            "ly": patch.get("ly", patch["y"]),
-                            "lw": patch.get("lw", patch["w"]),
-                            "lh": patch.get("lh", patch["h"]),
                         }
                         meta_bytes = json.dumps(meta).encode("utf-8")
                         self.sock.send_multipart([b"IFOP", meta_bytes, patch["px"]])
