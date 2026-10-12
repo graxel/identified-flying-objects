@@ -239,7 +239,7 @@ class CaptureAndExtractWorker:
                 "fast_diff": fast_diff,
                 "combined_diff": diag.get("combined_diff"),
                 "thresh_mask": diag.get("thresh_mask"),
-                "opened_mask": diag.get("opened_mask"),
+                "eroded_mask": diag.get("eroded_mask"),
                 "morphed_mask": diag.get("morphed_mask"),
                 "patches": patches,
                 "metadata": metadata,

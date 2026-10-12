@@ -40,11 +40,11 @@ CV_PARAM_DEFAULTS = {
     "min_area":          20,   # minimum blob area (low-res pixels)
     "max_area":        5000,   # maximum blob area (low-res pixels)
     "max_cloud_pct":     15,   # cloud fraction filter (÷100 → 0.15)
-    "morph_open_kernel":  3,   # open structuring element size (odd) – speckle removal
-    "morph_close_kernel":  7,   # close structuring element size (odd) – hole filling / blob growth
-    "morph_open_iter":    1,   # morphological open iterations (0 to 5)
-    "morph_close_iter":   2,   # morphological close iterations (0 to 5)
-    "diff_gain":          2,   # visual gain multiplier for diff displays (1x, 2x, 3x, 4x)
+    "erode_kernel":      3,   # erosion kernel size (odd) – speckle removal
+    "erode_iter":        1,   # erosion iterations (0 to 9)
+    "dilate_kernel":     7,   # dilation kernel size (odd) – hole filling / blob growth
+    "dilate_iter":       2,   # dilation iterations (0 to 9)
+    "diff_gain":         2,   # visual gain multiplier for diff displays (1x, 2x, 3x, 4x)
 }
 
 
@@ -94,7 +94,7 @@ class CameraState:
         self.low_res = np.zeros((600, 800), dtype=np.uint8)
         self.combined_diff = np.zeros((600, 800), dtype=np.uint8)
         self.thresh_mask = np.zeros((600, 800), dtype=np.uint8)
-        self.opened_mask = np.zeros((600, 800), dtype=np.uint8)
+        self.eroded_mask = np.zeros((600, 800), dtype=np.uint8)
         self.morphed_mask = np.zeros((600, 800), dtype=np.uint8)
         self.slow_diff = np.zeros((600, 800), dtype=np.uint8)
         self.fast_diff = np.zeros((600, 800), dtype=np.uint8)
@@ -152,10 +152,10 @@ class WorkbenchState:
             "min_area":           self.cv_params["min_area"],
             "max_area":           self.cv_params["max_area"],
             "max_cloud_fraction": self.cv_params["max_cloud_pct"] / 100.0,
-            "morph_open_kernel":  self.cv_params["morph_open_kernel"],
-            "morph_close_kernel": self.cv_params["morph_close_kernel"],
-            "morph_open_iter":    self.cv_params["morph_open_iter"],
-            "morph_close_iter":   self.cv_params["morph_close_iter"],
+            "erode_kernel":   self.cv_params["erode_kernel"],
+            "erode_iter":     self.cv_params["erode_iter"],
+            "dilate_kernel":  self.cv_params["dilate_kernel"],
+            "dilate_iter":    self.cv_params["dilate_iter"],
         }
         try:
             self._param_pub.send_multipart([b"PARAMS", json.dumps(payload).encode()])
@@ -272,11 +272,6 @@ def main():
     net_thread.start()
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-    try:
-        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-    except Exception:
-        pass
     cv2.resizeWindow(WINDOW_NAME, 1920, 1080)
 
     # Clean single control window for edge camera parameter tuning
@@ -296,10 +291,10 @@ def main():
     cv2.createTrackbar("Min Area",          CTRL_WINDOW, state.cv_params["min_area"],           500,   make_cv_tb_cb("min_area"))
     cv2.createTrackbar("Max Area",          CTRL_WINDOW, state.cv_params["max_area"],        100000,   make_cv_tb_cb("max_area"))
     cv2.createTrackbar("Cloud Pct",         CTRL_WINDOW, state.cv_params["max_cloud_pct"],      100,   make_cv_tb_cb("max_cloud_pct"))
-    cv2.createTrackbar("Morph Open Kern",  CTRL_WINDOW, state.cv_params["morph_open_kernel"],    9,   make_cv_tb_cb("morph_open_kernel"))
-    cv2.createTrackbar("Morph Close Kern", CTRL_WINDOW, state.cv_params["morph_close_kernel"],   17,   make_cv_tb_cb("morph_close_kernel"))
-    cv2.createTrackbar("Morph Open",        CTRL_WINDOW, state.cv_params["morph_open_iter"],      9,   make_cv_tb_cb("morph_open_iter"))
-    cv2.createTrackbar("Morph Close",       CTRL_WINDOW, state.cv_params["morph_close_iter"],     9,   make_cv_tb_cb("morph_close_iter"))
+    cv2.createTrackbar("Erode Kern",        CTRL_WINDOW, state.cv_params["erode_kernel"],    9,   make_cv_tb_cb("erode_kernel"))
+    cv2.createTrackbar("Erode Iters",       CTRL_WINDOW, state.cv_params["erode_iter"],       9,   make_cv_tb_cb("erode_iter"))
+    cv2.createTrackbar("Dilate Kern",       CTRL_WINDOW, state.cv_params["dilate_kernel"],   17,   make_cv_tb_cb("dilate_kernel"))
+    cv2.createTrackbar("Dilate Iters",      CTRL_WINDOW, state.cv_params["dilate_iter"],      9,   make_cv_tb_cb("dilate_iter"))
     cv2.createTrackbar("Diff Gain (x)",     CTRL_WINDOW, state.cv_params.get("diff_gain", 2),     7,   make_cv_tb_cb("diff_gain"))
 
     # Initial broadcast of loaded parameters
@@ -338,7 +333,7 @@ def main():
                         elif ptype == 11:
                             cam.thresh_mask = frame
                         elif ptype == 13:
-                            cam.opened_mask = frame
+                            cam.eroded_mask = frame
                         elif ptype == 12:
                             cam.morphed_mask = frame
                         elif ptype == 5:
@@ -478,12 +473,12 @@ def main():
                 thresh_img = t_cam.thresh_mask if t_cam.thresh_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
                 # Stage 5 & 6: Morphology steps (from camera)
-                k_open  = int(state.cv_params.get("morph_open_kernel",  state.cv_params.get("morph_kernel", 3)))
-                k_close = int(state.cv_params.get("morph_close_kernel", state.cv_params.get("morph_kernel", 3)))
-                open_iter = int(state.cv_params.get("morph_open_iter", 1))
-                close_iter = int(state.cv_params.get("morph_close_iter", 2))
+                k_erode  = int(state.cv_params.get("erode_kernel",  3))
+                k_dilate = int(state.cv_params.get("dilate_kernel", 7))
+                erode_iter  = int(state.cv_params.get("erode_iter",  1))
+                dilate_iter = int(state.cv_params.get("dilate_iter", 2))
 
-                opened_img = t_cam.opened_mask if t_cam.opened_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
+                eroded_img = t_cam.eroded_mask if t_cam.eroded_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
                 closed_img = t_cam.morphed_mask if t_cam.morphed_mask is not None else np.zeros((ph, pw), dtype=np.uint8)
 
                 # Build final closed mask panel with detection box overlay
@@ -506,8 +501,8 @@ def main():
                 p2 = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | 2. Fast (Red) & Slow (Blue) Diffs ({gain}x gain)")
                 p3 = prep_panel(comb_diff_g, t_cam.cam_id, f"cam{t_cam.cam_id} | 3. Combined Diff [min(slow, fast)] ({gain}x gain)")
                 p4 = prep_panel(thresh_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 4. Thresholded (thresh = {thresh_val})")
-                p5 = prep_panel(opened_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 5. After Open (k={k_open}, iter={open_iter})")
-                p6 = prep_panel(closed_colored, t_cam.cam_id, f"cam{t_cam.cam_id} | 6. Final Close (k={k_close}, iter={close_iter}) — {len(t_cam.boxes)} objs")
+                p5 = prep_panel(eroded_img, t_cam.cam_id, f"cam{t_cam.cam_id} | 5. Erode (k={k_erode}, iter={erode_iter})")
+                p6 = prep_panel(closed_colored, t_cam.cam_id, f"cam{t_cam.cam_id} | 6. Dilate (k={k_dilate}, iter={dilate_iter}) — {len(t_cam.boxes)} objs")
 
                 row1 = np.hstack([p1, p2, p3])
                 row2 = np.hstack([p4, p5, p6])

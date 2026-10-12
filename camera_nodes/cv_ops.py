@@ -23,29 +23,41 @@ DEFAULT_CV_PARAMS = {
     "min_area":           20,     # Minimum contour area to keep (pixels)
     "max_area":           5000,   # Maximum contour area to keep (pixels)
     "max_cloud_fraction": 0.15,   # Reject blobs covering more than this fraction of the frame
-    "morph_kernel":       3,      # Structuring element size (odd, e.g. 1, 3, 5)
-    "morph_open_iter":    1,      # Morphological open iterations (remove noise/speckles)
-    "morph_close_iter":   2,      # Morphological close iterations (fill holes/bridge gaps)
+    "erode_kernel":       3,      # Erosion kernel size (odd) — kills speckle noise
+    "erode_iter":         1,      # Erosion iterations
+    "dilate_kernel":      7,      # Dilation kernel size (odd) — fills holes, grows blobs
+    "dilate_iter":        2,      # Dilation iterations
 }
 
 
 def extract_patches(camera_mem, motion_boxes):
-    """Slice patches out of the high-res frame while the camera request is alive."""
+    """Slice patches out of the high-res frame while the camera request is alive.
+
+    Each motion_box must contain:
+      cx, cy  — patch center in main-res coordinates
+      w, h    — patch size in main-res pixels
+      lx, ly, lw, lh  — contour bounding rect in low-res coordinates (used for green box display)
+    """
     with MappedArray(camera_mem, "main") as m:
-        return [
-            {
+        patches = []
+        for src, dims in motion_boxes.items():
+            cx, cy = dims["cx"], dims["cy"]
+            w, h = dims["w"], dims["h"]
+            x0 = cx - w // 2
+            y0 = cy - h // 2
+            patches.append({
                 "source": src,
-                "x": dims["x"],
-                "y": dims["y"],
-                "w": dims["w"],
-                "h": dims["h"],
-                "px": m.array[
-                    dims["y"]:dims["y"] + dims["h"],
-                    dims["x"]:dims["x"] + dims["w"]
-                ].copy().tobytes()
-            }
-            for src, dims in motion_boxes.items()
-        ]
+                "x": cx,
+                "y": cy,
+                "w": w,
+                "h": h,
+                "lx": dims["lx"],
+                "ly": dims["ly"],
+                "lw": dims["lw"],
+                "lh": dims["lh"],
+                "px": m.array[y0:y0 + h, x0:x0 + w].copy().tobytes(),
+            })
+        return patches
 
 
 def compute_ema_diff(frame, bg, alpha):
@@ -97,31 +109,32 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
     _, fast_mask = cv2.threshold(fast_diff, diff_thresh, 255, cv2.THRESH_BINARY)
 
     # AND: keep only regions that differ from both backgrounds (thresholded/binarized mask)
-    candidate_mask = cv2.bitwise_and(slow_mask, fast_mask)
+    candidate_mask = fast_mask # Simplifying this temporarily. cv2.bitwise_and(slow_mask, fast_mask)
     thresh_mask = candidate_mask.copy()
 
     # 3. Morphology cleanup (topologically morphed result)
-    # Independent kernel sizes for open (speckle removal) and close (hole filling)
-    k_open = int(params.get("morph_open_kernel", params.get("morph_kernel", 3)))
-    if k_open < 1: k_open = 1
-    elif k_open % 2 == 0: k_open += 1
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (k_open, k_open))
+    # Step 1: Erosion — shrinks all blobs; speckle noise disappears entirely
+    k_erode = int(params.get("erode_kernel", 3))
+    if k_erode < 1: k_erode = 1
+    elif k_erode % 2 == 0: k_erode += 1
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_RECT, (k_erode, k_erode))
 
-    k_close = int(params.get("morph_close_kernel", params.get("morph_kernel", 3)))
-    if k_close < 1: k_close = 1
-    elif k_close % 2 == 0: k_close += 1
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (k_close, k_close))
+    # Step 2: Dilation — grows surviving blobs to fill holes and bridge nearby fragments
+    k_dilate = int(params.get("dilate_kernel", 7))
+    if k_dilate < 1: k_dilate = 1
+    elif k_dilate % 2 == 0: k_dilate += 1
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (k_dilate, k_dilate))
 
-    open_iter = int(params.get("morph_open_iter", 1))
-    close_iter = int(params.get("morph_close_iter", 2))
+    erode_iter  = int(params.get("erode_iter",  1))
+    dilate_iter = int(params.get("dilate_iter", 2))
 
-    opened_mask = candidate_mask
-    if open_iter > 0:
-        opened_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, kernel_open, iterations=open_iter)
+    eroded_mask = candidate_mask
+    if erode_iter > 0:
+        eroded_mask = cv2.erode(candidate_mask, kernel_erode, iterations=erode_iter)
 
-    morphed_mask = opened_mask
-    if close_iter > 0:
-        morphed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_close, iterations=close_iter)
+    morphed_mask = eroded_mask
+    if dilate_iter > 0:
+        morphed_mask = cv2.dilate(eroded_mask, kernel_dilate, iterations=dilate_iter)
 
     contours, _ = cv2.findContours(morphed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -148,20 +161,18 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         if w > max_low_res_w or h > max_low_res_h:
             continue
 
-        # Map center to main coordinate space, then build centered patch
-        center_x = x * scale_x + (w * scale_x) / 2.0
-        center_y = y * scale_y + (h * scale_y) / 2.0
+        # Map contour center to main coordinate space
         patch_w = int(w * scale_x)  # guaranteed <= 140
         patch_h = int(h * scale_y)  # guaranteed <= 140
-        patch_x = max(0, int(center_x - patch_w / 2.0))
-        patch_y = max(0, int(center_y - patch_h / 2.0))
-        # Clamp to image boundary
-        patch_w = min(patch_w, main_w - patch_x)
-        patch_h = min(patch_h, main_h - patch_y)
+        cx = int(x * scale_x + (w * scale_x) / 2.0)
+        cy = int(y * scale_y + (h * scale_y) / 2.0)
+        # Clamp center so patch stays within image bounds
+        cx = max(patch_w // 2, min(cx, main_w - patch_w // 2))
+        cy = max(patch_h // 2, min(cy, main_h - patch_h // 2))
 
         motion_boxes[idx] = {
-            "x": patch_x, "y": patch_y, "w": patch_w, "h": patch_h,  # main-res patch coords
-            "lx": x, "ly": y, "lw": w, "lh": h,                        # low-res bbox coords
+            "cx": cx, "cy": cy, "w": patch_w, "h": patch_h,  # main-res: center + size
+            "lx": x, "ly": y, "lw": w, "lh": h,               # low-res bbox coords
         }
         idx += 1
 
@@ -169,7 +180,7 @@ def process_motion_diffs(slow_diff, fast_diff, scale_x, scale_y, main_w, main_h,
         diag = {
             "combined_diff": combined_diff,
             "thresh_mask": thresh_mask,
-            "opened_mask": opened_mask,
+            "eroded_mask": eroded_mask,
             "morphed_mask": morphed_mask,
         }
         return motion_boxes, diag

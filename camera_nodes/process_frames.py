@@ -53,7 +53,7 @@ class FrameProcessor:
                     low_res_jpg = _encode_img(low_res_gray)
                     combined_diff_jpg = _encode_img(frame_data.get("combined_diff"))
                     thresh_mask_jpg = _encode_img(frame_data.get("thresh_mask"))
-                    opened_mask_jpg = _encode_img(frame_data.get("opened_mask"))
+                    eroded_mask_jpg = _encode_img(frame_data.get("eroded_mask"))
                     morphed_mask_jpg = _encode_img(frame_data.get("morphed_mask"))
                     slow_diff_jpg = _encode_img(frame_data.get("slow_diff"))
                     fast_diff_jpg = _encode_img(frame_data.get("fast_diff"))
@@ -65,7 +65,7 @@ class FrameProcessor:
                     low_res_jpg = None
                     combined_diff_jpg = None
                     thresh_mask_jpg = None
-                    opened_mask_jpg = None
+                    eroded_mask_jpg = None
                     morphed_mask_jpg = None
                     slow_diff_jpg = None
                     fast_diff_jpg = None
@@ -118,7 +118,7 @@ class FrameProcessor:
                         "low_res_shape": low_res_shape,
                         "combined_diff": combined_diff_jpg,
                         "thresh_mask": thresh_mask_jpg,
-                        "opened_mask": opened_mask_jpg,
+                        "eroded_mask": eroded_mask_jpg,
                         "morphed_mask": morphed_mask_jpg,
                         "slow_diff": slow_diff_jpg,
                         "fast_diff": fast_diff_jpg,
