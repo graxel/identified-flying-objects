@@ -43,6 +43,7 @@ CV_PARAM_DEFAULTS = {
     "morph_kernel":       3,   # structuring element kernel size (1, 3, 5, 7, 9)
     "morph_open_iter":    1,   # morphological open iterations (0 to 5)
     "morph_close_iter":   2,   # morphological close iterations (0 to 5)
+    "diff_gain":          2,   # visual gain multiplier for diff displays (1x, 2x, 3x, 4x)
 }
 
 
@@ -286,6 +287,7 @@ def main():
     cv2.createTrackbar("Morph Kernel",    CTRL_WINDOW, state.cv_params["morph_kernel"],         9,   make_cv_tb_cb("morph_kernel"))
     cv2.createTrackbar("Morph Open",      CTRL_WINDOW, state.cv_params["morph_open_iter"],      5,   make_cv_tb_cb("morph_open_iter"))
     cv2.createTrackbar("Morph Close",     CTRL_WINDOW, state.cv_params["morph_close_iter"],     5,   make_cv_tb_cb("morph_close_iter"))
+    cv2.createTrackbar("Diff Gain (x)",   CTRL_WINDOW, state.cv_params.get("diff_gain", 2),     4,   make_cv_tb_cb("diff_gain"))
 
     # Initial broadcast of loaded parameters
     state._broadcast_cv_params()
@@ -436,10 +438,27 @@ def main():
             else:
                 # Movement Detection Pipeline Diagnostics for Selected Camera
                 t_cam = state.cameras[state.diag_cam_id]
+                gain = max(1, int(state.cv_params.get("diff_gain", 1)))
+
+                # Stage 2a: Dual-diff overlay. Fast in Red (BGR R=ch2), Slow in Blue (BGR B=ch0)
+                # Apply gain with saturation clipping to 255
+                fast_g = cv2.convertScaleAbs(t_cam.fast_diff, alpha=gain) if t_cam.fast_diff is not None else np.zeros((ph, pw), dtype=np.uint8)
+                slow_g = cv2.convertScaleAbs(t_cam.slow_diff, alpha=gain) if t_cam.slow_diff is not None else np.zeros((ph, pw), dtype=np.uint8)
+                green_ch = np.zeros_like(fast_g)
+                # OpenCV BGR: B = slow_g, G = 0, R = fast_g
+                dual_overlay = cv2.merge([slow_g, green_ch, fast_g])
+
+                # Stage 2b: Combined diff in grayscale (min of slow and fast, with gain)
+                if t_cam.slow_diff is not None and t_cam.fast_diff is not None:
+                    comb_diff = cv2.min(t_cam.slow_diff, t_cam.fast_diff)
+                else:
+                    comb_diff = t_cam.combined_diff
+                comb_diff_g = cv2.convertScaleAbs(comb_diff, alpha=gain) if comb_diff is not None else np.zeros((ph, pw), dtype=np.uint8)
+
                 p_tl = prep_panel(render_cam_view(t_cam), t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 1: Low-Res + Detected Boxes ({len(t_cam.boxes)} objs)")
-                p_tr = prep_panel(t_cam.combined_diff, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 2: Combined Diff [min(slow, fast)]")
-                p_bl = prep_panel(t_cam.thresh_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 3: Binarized Mask (thresh = {state.cv_params['diff_thresh']})")
-                p_br = prep_panel(t_cam.morphed_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 4: Morphed (k={state.cv_params['morph_kernel']} open={state.cv_params['morph_open_iter']} close={state.cv_params['morph_close_iter']})")
+                p_tr = prep_panel(dual_overlay, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 2: Diff Overlay [Fast=Red, Slow=Blue] ({gain}x gain)")
+                p_bl = prep_panel(comb_diff_g, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 3: Combined Diff [min(slow, fast)] ({gain}x gain)")
+                p_br = prep_panel(t_cam.morphed_mask, t_cam.cam_id, f"cam{t_cam.cam_id} | Stage 4: Morphed Mask (thresh = {state.cv_params['diff_thresh']})")
 
             row1 = np.hstack([p_tl, p_tr])
             row2 = np.hstack([p_bl, p_br])

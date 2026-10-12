@@ -54,6 +54,8 @@ class FrameProcessor:
                     combined_diff_jpg = _encode_img(frame_data.get("combined_diff"))
                     thresh_mask_jpg = _encode_img(frame_data.get("thresh_mask"))
                     morphed_mask_jpg = _encode_img(frame_data.get("morphed_mask"))
+                    slow_diff_jpg = _encode_img(frame_data.get("slow_diff"))
+                    fast_diff_jpg = _encode_img(frame_data.get("fast_diff"))
                     
                     self.last_low_res_encode_time = encode_time
                     low_res_shape = low_res_gray.shape
@@ -63,6 +65,8 @@ class FrameProcessor:
                     combined_diff_jpg = None
                     thresh_mask_jpg = None
                     morphed_mask_jpg = None
+                    slow_diff_jpg = None
+                    fast_diff_jpg = None
                     low_res_shape = None
                 
                 # 3. use camera calibration to convert patch coords to 3D ray
@@ -113,6 +117,8 @@ class FrameProcessor:
                         "combined_diff": combined_diff_jpg,
                         "thresh_mask": thresh_mask_jpg,
                         "morphed_mask": morphed_mask_jpg,
+                        "slow_diff": slow_diff_jpg,
+                        "fast_diff": fast_diff_jpg,
                     }
                     try:
                         self.send_queue.put(send_frames_obj, block=False)
