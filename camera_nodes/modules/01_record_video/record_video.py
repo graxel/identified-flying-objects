@@ -48,8 +48,6 @@ finally:
 video = np.stack(frames)
 np.save(OUTPUT, video)
 
-np.save(OUTPUT, video)
-
 duration = time.monotonic() - start_time
 print(f"Saved {video.shape[0]} frames in {duration:.2f} s")
 print(f"Average rate: {video.shape[0] / duration:.2f} fps")
