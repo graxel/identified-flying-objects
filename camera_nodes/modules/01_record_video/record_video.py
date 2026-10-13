@@ -55,7 +55,13 @@ print(f"Frame shape: {video.shape[1:]}")
 print(f"Sending to {DESTINATION_HOST}")
 
 subprocess.run(
-    ["scp", OUTPUT, f"{DESTINATION_HOST}:{DESTINATION_DIR}"],
+    [
+        "scp",
+        "-i", "/home/cameron/.ssh/id_ed25519",
+        "-o", "IdentitiesOnly=yes",
+        OUTPUT,
+        f"{DESTINATION_HOST}:{DESTINATION_DIR}",
+    ],
     check=True,
 )
 print("Upload complete")
