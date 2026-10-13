@@ -7,7 +7,7 @@ from datetime import datetime
 import os
 import subprocess
 
-DESTINATION_HOST = "graxel.local"
+DESTINATION_HOST = "graxel@graxel.local"
 DESTINATION_DIR = "~/repos/identified-flying-objects/data/recordings/"
 
 curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
