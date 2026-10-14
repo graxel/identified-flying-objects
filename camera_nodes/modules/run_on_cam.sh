@@ -10,8 +10,9 @@ set -euo pipefail
 #   ./run_on_cam.sh 01_record_video/record_video.py --seconds 10
 #
 # Copies the selected module folder and modules/common/ to a temporary
-# directory on cam1, stops camera.service, runs the script there, then
-# restarts camera.service and removes the temporary directory.
+# directory on cam1, stops camera.service, runs the script with the
+# camera's project environment, then restarts camera.service and removes
+# the temporary directory.
 #
 # The camera's git checkout is not modified.
 # ---------------------------------------------------------------------------
@@ -92,8 +93,10 @@ MODULE_FOLDER="$2"
 SCRIPT_NAME="$3"
 shift 3
 
+
 SERVICE="camera.service"
-PYTHON="$(dirname "$TRY_DIR")/../.venv/bin/python"
+REMOTE_MODULES="$(dirname "$TRY_DIR")"
+UV="$HOME/.local/bin/uv"
 
 
 cleanup() {
@@ -105,17 +108,8 @@ trap cleanup EXIT
 
 sudo systemctl stop "$SERVICE"
 
+
 cd "$REMOTE_MODULES"
-uv sync --no-dev
-
-cd "$TRY_DIR"
-
-
-if [[ ! -f "$MODULE_FOLDER/$SCRIPT_NAME" ]]; then
-    echo "ERROR: Script not found: $TRY_DIR/$MODULE_FOLDER/$SCRIPT_NAME" >&2
-    exit 1
-fi
-
-
-"$PYTHON" "$MODULE_FOLDER/$SCRIPT_NAME" "$@"
+"$UV" run --no-dev python -u \
+    "$TRY_DIR/$MODULE_FOLDER/$SCRIPT_NAME" "$@"
 REMOTE_SCRIPT
