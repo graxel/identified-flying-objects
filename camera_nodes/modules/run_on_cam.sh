@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+
+# ---------------------------------------------------------------------------
+# Usage:
+#   ./run_on_cam.sh <module-folder>/<script>.py [arguments...]
+#
+# Example:
+#   ./run_on_cam.sh 01_record_video/record_video.py --seconds 10
+#
+# Copies the selected module folder and modules/common/ to a temporary
+# directory on cam1, stops camera.service, runs the script there, then
+# restarts camera.service and removes the temporary directory.
+#
+# The camera's git checkout is not modified.
+# ---------------------------------------------------------------------------
+
+
+CAMERA_HOST="cameron@cam1.local"
+SERVICE="camera.service"
+
+# Use Homebrew's modern rsync, which supports --info=progress2.
+RSYNC="/opt/homebrew/bin/rsync"
+
+LOCAL_REPO="$HOME/repos/identified-flying-objects"
+LOCAL_MODULES="${LOCAL_REPO}/camera_nodes/modules"
+
+# The camera checkout is directly in the camera user's home directory.
+REMOTE_REPO="identified-flying-objects"
+REMOTE_TRY_DIR="${REMOTE_REPO}/camera_nodes/modules/.try"
+
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <module-folder>/<script>.py [arguments...]" >&2
+    echo "Example: $0 01_record_video/record_video.py --seconds 10" >&2
+    exit 1
+fi
+
+
+SCRIPT="$1"
+shift
+
+
+MODULE_FOLDER="$(dirname "${SCRIPT}")"
+SCRIPT_NAME="$(basename "${SCRIPT}")"
+
+
+if [[ "${MODULE_FOLDER}" == "." || "${MODULE_FOLDER}" == "common" ]]; then
+    echo "ERROR: Script must be inside a module folder, for example:" >&2
+    echo "  01_record_video/record_video.py" >&2
+    exit 1
+fi
+
+
+LOCAL_MODULE_DIR="${LOCAL_MODULES}/${MODULE_FOLDER}"
+LOCAL_COMMON_DIR="${LOCAL_MODULES}/common"
+
+
+if [[ ! -d "${LOCAL_MODULE_DIR}" ]]; then
+    echo "ERROR: Local module folder not found: ${LOCAL_MODULE_DIR}" >&2
+    exit 1
+fi
+
+
+
+# Remove any previous temporary copy, then copy only the selected module
+# folder and the shared common/ folder.
+ssh "${CAMERA_HOST}" "rm -rf '${REMOTE_TRY_DIR}'"
+
+
+"${RSYNC}" -a --info=progress2 --no-inc-recursive \
+    "${LOCAL_MODULE_DIR}" \
+    "${CAMERA_HOST}:${REMOTE_TRY_DIR}/"
+
+
+if [[ -d "${LOCAL_COMMON_DIR}" ]]; then
+    "${RSYNC}" -a --info=progress2 --no-inc-recursive \
+        "${LOCAL_COMMON_DIR}" \
+        "${CAMERA_HOST}:${REMOTE_TRY_DIR}/"
+fi
+
+
+
+ssh "${CAMERA_HOST}" bash -s -- \
+    "${REMOTE_TRY_DIR}" "${MODULE_FOLDER}" "${SCRIPT_NAME}" "$@" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+
+TRY_DIR="$HOME/$1"
+MODULE_FOLDER="$2"
+SCRIPT_NAME="$3"
+shift 3
+
+SERVICE="camera.service"
+PYTHON="$(dirname "$TRY_DIR")/../.venv/bin/python"
+
+
+cleanup() {
+    sudo systemctl start "$SERVICE"
+    rm -rf "$TRY_DIR"
+}
+trap cleanup EXIT
+
+
+sudo systemctl stop "$SERVICE"
+
+cd "$REMOTE_MODULES"
+uv sync --no-dev
+
+cd "$TRY_DIR"
+
+
+if [[ ! -f "$MODULE_FOLDER/$SCRIPT_NAME" ]]; then
+    echo "ERROR: Script not found: $TRY_DIR/$MODULE_FOLDER/$SCRIPT_NAME" >&2
+    exit 1
+fi
+
+
+"$PYTHON" "$MODULE_FOLDER/$SCRIPT_NAME" "$@"
+REMOTE_SCRIPT
