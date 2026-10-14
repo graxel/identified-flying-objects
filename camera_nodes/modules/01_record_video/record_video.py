@@ -12,8 +12,10 @@ DESTINATION_DIR = "~/repos/identified-flying-objects/data/recordings/"
 
 curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 OUTPUT = f"recording_{curr_time}.npy"
-MAIN_SIZE = (4056, 3040)
-LORES_SIZE = (800, 600)
+MAIN_SIZE = (3840, 2880) # this is the largest res that allows an integer reduction to a valid low_res
+LOW_RES_SCALE = 3 # 2, 3, or 4
+LORES_SIZE = (dim//LOW_RES_SCALE for dim in MAIN_SIZE)
+LORES_SIZE = (MAIN_SIZE[0]//LOW_RES_SCALE, MAIN_SIZE[1]//LOW_RES_SCALE) # which of these LORES_SIZE defs is nicer?
 SECONDS = 10
 
 picam2 = Picamera2()
