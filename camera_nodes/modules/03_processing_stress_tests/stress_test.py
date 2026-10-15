@@ -17,10 +17,11 @@ import time
 import os
 import shutil
 import signal
-from datetime import datetime
 
 from picamera2 import Picamera2, MappedArray
 from libcamera import Transform
+
+from common.run import get_output_dir, report_artifacts
 
 # --- Config (overridable via CLI args) ---
 MAIN_SIZE = (3840, 2880)
@@ -38,17 +39,7 @@ THRESH = 3.0        # real-value threshold
 THRESH_SCALED = int(round(THRESH * DIFF_SCALE))
 QUEUE_MAXSIZE = 2
 
-# Run directory is provided by run_on_cam.sh via IFO_RUN_DIR;
-# fall back to a local timestamped folder when run standalone.
-RUN_DIR = os.environ.get("IFO_RUN_DIR")
-if not RUN_DIR:
-    RUN_DIR = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..", "camera_artifacts",
-        datetime.now().strftime("%Y-%m-%d__%H.%M.%S__manual"),
-    )
-OUTPUT_DIR = os.path.abspath(RUN_DIR)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR = get_output_dir()
 if WRITE_JPEGS:
     for sub in ("low_res", "diff", "blurred"):
         os.makedirs(os.path.join(OUTPUT_DIR, sub), exist_ok=True)
@@ -238,7 +229,6 @@ if WRITE_JPEGS:
                 shutil.copy(os.path.join(sub_dir, fname),
                             os.path.join(samples_dir, f"{sub}_{fname}"))
     print(f"sample frames written to {samples_dir}", flush=True)
-    print(f"ARTIFACTS:{os.path.abspath(samples_dir)}", flush=True)
+    report_artifacts("samples")
 else:
     print(f"(jpeg writing disabled, nothing to upload)", flush=True)
-    print("ARTIFACTS:", flush=True)

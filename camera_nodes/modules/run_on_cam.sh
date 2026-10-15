@@ -81,7 +81,7 @@ if [[ -d "${LOCAL_COMMON_DIR}" ]]; then
         "${LOCAL_COMMON_DIR}" \
         "${CAMERA_HOST}:${REMOTE_TRY_DIR}/"
 fi
-REMOTE_OUTPUT="$(ssh "${CAMERA_HOST}" env IFO_RUN_DIR="$HOME/${REMOTE_RUN_DIR}" bash -s -- \
+REMOTE_OUTPUT="$(ssh "${CAMERA_HOST}" env IFO_RUN_DIR="\$HOME/${REMOTE_RUN_DIR}" bash -s -- \
     "${REMOTE_TRY_DIR}" "${MODULE_FOLDER}" "${SCRIPT_NAME}" "$@" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
