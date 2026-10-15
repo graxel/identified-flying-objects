@@ -26,6 +26,7 @@ picam2 = Picamera2()
 config = picam2.create_preview_configuration(
     main={"size": MAIN_SIZE, "format": "RGB888"},
     lores={"size": LOW_RES_SIZE, "format": "YUV420"},
+    raw=None,
     transform=Transform(hflip=1, vflip=1),
     buffer_count=2,
 )

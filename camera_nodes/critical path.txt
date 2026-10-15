@@ -1,33 +1,29 @@
 CRITICAL PATH LOOP: (can only happen on one core/thread)
 
-    - camera capture
+    - camera capture (main and low_res in camera memory)
 
-    - [AI output => AI boxes]
+    - low_res => ema diffs
 
-    - low_res => diffs
+    - diffs => motion boxes (thresholding, eroding, dilating, contour finding of blobs, conversion to bounding boxes)
 
-    - diffs => motion boxes
-
-    - AI boxes AND motion boxes => patches
+    - motion boxes => patches (use box coordinates to snip out relevant parts from main in camera memory)
 
     - release camera mem
 
     - timing stuff
 
-    - pack patches, low_res, and timing data ++and diffs and bgs++ into a preprocessed_frame dict
+    - pack patches, low_res, and timing data [and diffs and bgs] into a dict called frame
     
-    - push that onto an encoding queue
+    - push frame onto a processing queue
 
 
 OTHER STEPS: (can happen on one or more other cores/threads)
 
-    [low_res => ml_train]
-
-    jpeg encode low_res ++and diffs and bgs++
+    jpeg encode low_res [and diffs and bgs]
 
     use camera calibration to convert patch coords to 3D ray
 
     serialize everything to send
 
-    send patches and jpeg-encoded stuff [and ml_train]
+    send patches and jpeg-encoded stuff
 

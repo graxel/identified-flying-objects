@@ -17,8 +17,7 @@ set -euo pipefail
 # The camera's git checkout is not modified.
 # ---------------------------------------------------------------------------
 
-
-CAMERA_HOST="cameron@cam1.local"
+CAMERA_HOST="cameron@cam3.local"
 SERVICE="camera.service"
 
 # Use Homebrew's modern rsync, which supports --info=progress2.
@@ -49,7 +48,7 @@ SCRIPT_NAME="$(basename "${SCRIPT}")"
 
 if [[ "${MODULE_FOLDER}" == "." || "${MODULE_FOLDER}" == "common" ]]; then
     echo "ERROR: Script must be inside a module folder, for example:" >&2
-    echo "  01_record_video/record_video.py" >&2
+    echo "  01_record_video/record_video.py --seconds 10" >&2
     exit 1
 fi
 
@@ -81,9 +80,7 @@ if [[ -d "${LOCAL_COMMON_DIR}" ]]; then
         "${CAMERA_HOST}:${REMOTE_TRY_DIR}/"
 fi
 
-
-
-ssh "${CAMERA_HOST}" bash -s -- \
+REMOTE_OUTPUT="$(ssh "${CAMERA_HOST}" bash -s -- \
     "${REMOTE_TRY_DIR}" "${MODULE_FOLDER}" "${SCRIPT_NAME}" "$@" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
@@ -113,3 +110,18 @@ cd "$REMOTE_MODULES"
 "$UV" run --no-dev python -u \
     "$TRY_DIR/$MODULE_FOLDER/$SCRIPT_NAME" "$@"
 REMOTE_SCRIPT
+)"
+
+echo "${REMOTE_OUTPUT}"
+
+# Parse the artifact path from the last ARTIFACTS: line
+ARTIFACT_PATH="$(echo "${REMOTE_OUTPUT}" | grep '^ARTIFACTS:' | tail -1 | cut -d: -f2-)"
+
+if [[ -n "${ARTIFACT_PATH}" ]]; then
+    mkdir -p ./camera_artifacts
+    echo "Fetching artifacts: ${ARTIFACT_PATH}"
+    scp -r "${CAMERA_HOST}:${ARTIFACT_PATH}" ./camera_artifacts/
+    echo "Artifacts saved to ./camera_artifacts/"
+else
+    echo "No artifacts to fetch."
+fi
