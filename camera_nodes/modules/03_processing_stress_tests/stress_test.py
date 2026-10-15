@@ -38,8 +38,16 @@ THRESH = 3.0        # real-value threshold
 THRESH_SCALED = int(round(THRESH * DIFF_SCALE))
 QUEUE_MAXSIZE = 2
 
-curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_DIR = f"soak_scale{LOW_RES_SCALE}_buf{BUFFER_COUNT}_{curr_time}"
+# Run directory is provided by run_on_cam.sh via IFO_RUN_DIR;
+# fall back to a local timestamped folder when run standalone.
+RUN_DIR = os.environ.get("IFO_RUN_DIR")
+if not RUN_DIR:
+    RUN_DIR = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "camera_artifacts",
+        datetime.now().strftime("%Y-%m-%d__%H.%M.%S__manual"),
+    )
+OUTPUT_DIR = os.path.abspath(RUN_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 if WRITE_JPEGS:
     for sub in ("low_res", "diff", "blurred"):
