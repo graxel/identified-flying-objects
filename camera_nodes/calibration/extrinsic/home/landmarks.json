@@ -1,0 +1,98 @@
+[
+  {
+    "id": "lm1",
+    "name": "Skyline Landmark 1",
+    "description": "Distant landmark 1 from landmark_notes.txt (altitude 668 ft)",
+    "hint": "Click landmark 1 in the skyline reference image",
+    "world_enu": [
+      -491.67,
+      2585.06,
+      187.76
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm2",
+    "name": "Skyline Landmark 2",
+    "description": "Distant landmark 2 from landmark_notes.txt (altitude 1413 ft)",
+    "hint": "Click landmark 2 in the skyline reference image",
+    "world_enu": [
+      -522.91,
+      3803.12,
+      414.95
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm3",
+    "name": "Skyline Landmark 3",
+    "description": "Distant landmark 3 from landmark_notes.txt (altitude 717 ft)",
+    "hint": "Click landmark 3 in the skyline reference image",
+    "world_enu": [
+      -178.81,
+      2690.37,
+      202.69
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm4",
+    "name": "Skyline Landmark 4",
+    "description": "Distant landmark 4 from landmark_notes.txt (altitude 888 ft)",
+    "hint": "Click landmark 4 in the skyline reference image",
+    "world_enu": [
+      106.12,
+      3589.83,
+      254.77
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm5",
+    "name": "Skyline Landmark 5",
+    "description": "Distant landmark 5 from landmark_notes.txt (altitude 562 ft)",
+    "hint": "Click landmark 5 in the skyline reference image",
+    "world_enu": [
+      349.85,
+      3895.85,
+      155.55
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm6",
+    "name": "Skyline Landmark 6",
+    "description": "Distant landmark 6 from landmark_notes.txt (altitude 1486 ft)",
+    "hint": "Click landmark 6 in the skyline reference image",
+    "world_enu": [
+      2472.72,
+      9603.31,
+      437.08
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm7",
+    "name": "Skyline Landmark 7",
+    "description": "Distant landmark 7 from landmark_notes.txt (altitude 1448 ft)",
+    "hint": "Click landmark 7 in the skyline reference image",
+    "world_enu": [
+      2604.42,
+      8615.24,
+      425.5
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  },
+  {
+    "id": "lm8",
+    "name": "Skyline Landmark 8",
+    "description": "Distant landmark 8 from landmark_notes.txt (altitude 810 ft)",
+    "hint": "Click landmark 8 in the skyline reference image",
+    "world_enu": [
+      1303.39,
+      3506.01,
+      231.04
+    ],
+    "example_image": "home/skyline_calibration_reference.jpg"
+  }
+]

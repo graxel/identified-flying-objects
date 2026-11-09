@@ -1,36 +1,4 @@
-
-
-
-Ground Elevation
-5
-
-Height Roof
-1,408.377901
-
-NAME
-Tower 1 World Trade Ctr
-
-=========
-
-
-Ground Elevation
-6
-Height Roof
-511
-LAST_EDITED_DATE
-2017 Aug 22 01:28:14 PM
-LAST_STATUS_TYPE
-Constructed
-Map Pluto BBL
-1000057501
-NAME
-2 New York Plaza
-
-=======
-Pace U tower
-
-
-
+# ground elevation + height = altitude
 
 1
 lat, lon: -74.012480, 40.701930
@@ -82,13 +50,13 @@ ground: 10
 
 
 
-19 delevan is 65 feet high
+home building is 65 feet high
 and the ground is 8
+cam2 is 12 feet below roof
+so 56 + 8 - 12 = 52 ft of altitude
 
-cams center
+cams center # just use this for cam2 for now (the only camera at home currently)
 lat, lon: -74.006656, 40.678708
 
-cams unit vector
-lat, lon: -74.006729, 40.678758
-
-measure distance between 
+#cams unit vector
+#lat, lon: -74.006729, 40.678758

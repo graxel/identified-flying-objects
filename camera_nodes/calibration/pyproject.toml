@@ -11,7 +11,7 @@ dependencies = [
 
 [tool.uv]
 # Run from the calibration/ directory:
-#   uv run intrinsic_capture.py
-#   uv run intrinsic_calibrate.py --board-w 9 --board-h 6 --square-mm 25
+#   uv run intrinsic/capture.py
+#   uv run intrinsic/calibrate.py --board-w 9 --board-h 6 --square-mm 25
 #   uv run extrinsic_mark.py
 #   uv run extrinsic_solve.py

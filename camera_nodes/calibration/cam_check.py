@@ -316,7 +316,7 @@ def main():
 
     print()
     if all_ok:
-        print(f"{GREEN}All cameras ready. You can run intrinsic_capture.py.{RESET}")
+        print(f"{GREEN}All cameras ready. You can run intrinsic/capture.py.{RESET}")
         if not args.stop_service:
             print(f"{YELLOW}Remember to stop camera.service on all Pis first:{RESET}")
             for cam in cameras:

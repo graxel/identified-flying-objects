@@ -3,7 +3,9 @@ uv.lock
 
 
 # Local calibration captures
-/calibration/intrinsic/cam[1-4]/captures/
-/calibration/intrinsic/cam[1-4]/used/
+/calibration/intrinsic/cam*/captures/
+/calibration/intrinsic/cam*/used/
+/calibration/intrinsic/cam*/rejected/
+/calibration/intrinsic/report/out/
 
 /modules/camera_artifacts/*

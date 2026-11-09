@@ -13,6 +13,10 @@ Camera extrinsic results are saved to:
 
 Controls:
     Click       — mark the active landmark's pixel position on this camera
+                  (coarse: 4 px steps in the video pane)
+    Click in Magnifier — set/refine the mark at full-resolution precision;
+                  move the mouse from the video into the Magnifier first, and
+                  it freezes on the active mark (or the last hover point)
     N           — next landmark
     B           — back to previous landmark
     , (comma)   — clear the active landmark's mark
@@ -21,7 +25,11 @@ Controls:
     Enter       — save all marks and write calib.json
 
 Usage:
-    python3 extrinsic_mark.py
+    python3 extrinsic_mark.py --env home [--cams 2]
+
+Marks are saved in MAIN_SIZE (3840x2880) pixel coordinates; the live view is
+streamed at full MAIN_SIZE and shown at 1/4 scale, with a 5x magnifier
+window around the mouse.
 
 Dependencies (on your laptop):
     uv pip install opencv-python numpy
@@ -43,14 +51,34 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 CAMERAS = [
-    {"id": 1, "host": "cam1.local", "user": "cameron"},
-    {"id": 2, "host": "cam2.local", "user": "cameron"},
-    {"id": 3, "host": "cam3.local", "user": "cameron"},
-    {"id": 4, "host": "cam4.local", "user": "cameron"},
+    # {"id": 1, "host": "cam1.local", "user": "cameron"},
+    {"id": 2, "host": "cam2.local", "user": "cameron"},   # only camera at home
+    # {"id": 3, "host": "cam3.local", "user": "cameron"},
+    # {"id": 4, "host": "cam4.local", "user": "cameron"},
 ]
 
-PREVIEW_W = 960
-PREVIEW_H = 720
+# Must match modules/common/camera.py. The live stream is pulled at full
+# MAIN_SIZE (~6 fps at quality 93, ~10 fps at quality 60 on a Zero 2 W) and
+# shown at 1/4 scale. Marks are recorded in MAIN_SIZE pixel
+# coordinates (what extrinsic_solve.py scales the intrinsics to).
+MAIN_SIZE  = (3840, 2880)
+
+STREAM_FPS     = 5
+STREAM_QUALITY = 80
+
+# Magnifier: a small window showing the area around the mouse. MAG_ZOOM is
+# relative to the preview, so each preview pixel becomes MAG_ZOOM x MAG_ZOOM;
+# the pixels come from the full-resolution frame, so it shows real detail.
+MAG_SIZE = 320
+MAG_ZOOM = 5
+MAG_WINDOW_NAME = "Magnifier"
+
+PREVIEW_W = MAIN_SIZE[0] // 4
+PREVIEW_H = MAIN_SIZE[1] // 4
+
+# preview pixel -> main-frame pixel
+MARK_SCALE_X = MAIN_SIZE[0] / PREVIEW_W
+MARK_SCALE_Y = MAIN_SIZE[1] / PREVIEW_H
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 EXTRINSIC_DIR = os.path.join(SCRIPT_DIR, "extrinsic")
@@ -171,20 +199,21 @@ def restart_camera_services(cameras):
     return results
 
 # ---------------------------------------------------------------------------
-# MJPEG stream reader (same approach as intrinsic_capture.py)
+# MJPEG stream reader (same approach as intrinsic/capture.py)
 # ---------------------------------------------------------------------------
 
 class MJPEGStreamReader:
     MJPEG_SOI = b'\xff\xd8'
     MJPEG_EOI = b'\xff\xd9'
 
-    def __init__(self, cam_id, host, user, width=PREVIEW_W, height=PREVIEW_H):
+    def __init__(self, cam_id, host, user, width=MAIN_SIZE[0], height=MAIN_SIZE[1]):
         self.cam_id    = cam_id
         self.host      = host
         self.user      = user
         self.width     = width
         self.height    = height
-        self.frame     = np.zeros((height, width, 3), dtype=np.uint8)
+        self.frame     = np.zeros((PREVIEW_H, PREVIEW_W, 3), dtype=np.uint8)
+        self.full      = None   # newest full-resolution frame (swapped, never mutated)
         self.lock      = threading.Lock()
         self.running   = False
         self.proc      = None
@@ -207,12 +236,16 @@ class MJPEGStreamReader:
         with self.lock:
             return self.frame.copy()
 
+    def get_full(self):
+        with self.lock:
+            return self.full
+
     def _build_cmd(self):
         remote = (
             f"rpicam-vid "
             f"--width {self.width} --height {self.height} "
-            f"--framerate 15 "
-            f"--codec mjpeg "
+            f"--framerate {STREAM_FPS} "
+            f"--codec mjpeg --quality {STREAM_QUALITY} "
             f"--inline --nopreview "
             f"--hflip --vflip "
             f"-t 0 -o -"
@@ -248,9 +281,10 @@ class MJPEGStreamReader:
                         arr = np.frombuffer(jpg, dtype=np.uint8)
                         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                         if img is not None:
-                            img = cv2.resize(img, (self.width, self.height))
+                            small = cv2.resize(img, (PREVIEW_W, PREVIEW_H), interpolation=cv2.INTER_AREA)
                             with self.lock:
-                                self.frame = img
+                                self.frame = small
+                                self.full  = img
             except Exception as ex:
                 self.error_msg = str(ex)
                 self.connected = False
@@ -414,8 +448,78 @@ def render_side_pane(landmarks, active_lm_idx, cam_marks, cam_id, pane_w, pane_h
     return pane
 
 
+def mag_to_main(center, pos):
+    """Magnifier-window pixel -> main-frame pixel, given the view's centre."""
+    ppm = MARK_SCALE_X / MAG_ZOOM
+    return (int(round(center[0] + (pos[0] - MAG_SIZE // 2) * ppm)),
+            int(round(center[1] + (pos[1] - MAG_SIZE // 2) * ppm)))
+
+
+def render_magnifier(full, center, marks, landmarks, active_lm_idx, cursor=None):
+    """
+    MAG_SIZE x MAG_SIZE view of the full-resolution frame around `center`
+    (main-frame pixels), at MAG_ZOOM x the preview scale, with a crosshair at
+    the pixel a click would mark and any existing marks in view. While hovering
+    the video that pixel is the centre; while the mouse is inside the magnifier
+    (`cursor` = its position in magnifier pixels) it is under the cursor.
+    """
+    img = np.zeros((MAG_SIZE, MAG_SIZE, 3), dtype=np.uint8)
+    if full is None or center is None:
+        text(img, "Hover over the video", 70, MAG_SIZE // 2, COLOR_GRAY, scale=0.55, outline=False)
+        return img
+
+    # Main-frame pixels per magnifier pixel
+    ppm = MARK_SCALE_X / MAG_ZOOM
+    half = int(round(MAG_SIZE * ppm / 2))
+    cx, cy = center
+    x0, y0 = cx - half, cy - half
+    x1, y1 = cx + half, cy + half
+    H, W = full.shape[:2]
+    sx0, sy0 = max(x0, 0), max(y0, 0)
+    sx1, sy1 = min(x1, W), min(y1, H)
+    if sx1 > sx0 and sy1 > sy0:
+        crop = cv2.resize(full[sy0:sy1, sx0:sx1],
+                          (round((sx1 - sx0) / ppm), round((sy1 - sy0) / ppm)),
+                          interpolation=cv2.INTER_CUBIC)
+        ox, oy = round((sx0 - x0) / ppm), round((sy0 - y0) / ppm)
+        h, w = min(crop.shape[0], MAG_SIZE - oy), min(crop.shape[1], MAG_SIZE - ox)
+        img[oy:oy + h, ox:ox + w] = crop[:h, :w]
+
+    # Existing marks that fall inside the view
+    for i, lm in enumerate(landmarks):
+        mk = marks.get(lm["id"])
+        if mk is None:
+            continue
+        mx, my = round((mk[0] - x0) / ppm), round((mk[1] - y0) / ppm)
+        if 0 <= mx < MAG_SIZE and 0 <= my < MAG_SIZE:
+            draw_reticle(img, mx, my, COLOR_ACCENT if i == active_lm_idx else COLOR_GREEN,
+                         size=10, thick=1)
+
+    # Crosshair with a wide gap so the target pixel itself stays visible
+    mx, my = cursor if cursor is not None else (MAG_SIZE // 2, MAG_SIZE // 2)
+    gap, arm = 14, 40
+    for a, b in (((mx - gap - arm, my), (mx - gap, my)), ((mx + gap, my), (mx + gap + arm, my)),
+                 ((mx, my - gap - arm), (mx, my - gap)), ((mx, my + gap), (mx, my + gap + arm))):
+        cv2.line(img, a, b, COLOR_BLACK, 3, cv2.LINE_AA)
+        cv2.line(img, a, b, COLOR_YELLOW, 1, cv2.LINE_AA)
+    px, py = mag_to_main(center, (mx, my))
+    text(img, f"({px}, {py})", 6, MAG_SIZE - 8, COLOR_YELLOW, scale=0.5, thick=1)
+    if cursor is not None:
+        text(img, "click = set mark", 6, 18, COLOR_CYAN, scale=0.45, thick=1)
+    cv2.rectangle(img, (0, 0), (MAG_SIZE - 1, MAG_SIZE - 1), (100, 100, 120), 1)
+    return img
+
+
+def main_to_preview(pt):
+    return int(round(pt[0] / MARK_SCALE_X)), int(round(pt[1] / MARK_SCALE_Y))
+
+
 def render_video_pane(frame, marks, active_lm_idx, landmarks, connected):
-    """Overlay reticles and active-landmark highlight on the video frame."""
+    """Overlay reticles and active-landmark highlight on the video frame.
+
+    frame is already preview-sized ; marks are in
+    main-frame pixels and are mapped into preview coordinates.
+    """
     img = frame.copy()
     if not connected:
         cv2.putText(img, "Connecting to camera...",
@@ -427,11 +531,12 @@ def render_video_pane(frame, marks, active_lm_idx, landmarks, connected):
         mk = marks.get(lm["id"])
         if mk is not None:
             color = COLOR_ACCENT if i == active_lm_idx else COLOR_GREEN
-            draw_reticle(img, mk[0], mk[1], color)
+            px, py = main_to_preview(mk)
+            draw_reticle(img, px, py, color)
             label = f"{i + 1}"
-            cv2.putText(img, label, (mk[0] + 16, mk[1] - 8),
+            cv2.putText(img, label, (px + 16, py - 8),
                         FONT, 0.55, COLOR_BLACK, 3, cv2.LINE_AA)
-            cv2.putText(img, label, (mk[0] + 16, mk[1] - 8),
+            cv2.putText(img, label, (px + 16, py - 8),
                         FONT, 0.55, color, 1, cv2.LINE_AA)
 
     return img
@@ -490,7 +595,7 @@ def save_marks(all_marks, landmarks, calib_file):
         out["units"] = existing["units"]
     if "enu_origin" in existing:
         out["enu_origin"] = existing["enu_origin"]
-    out["mark_resolution"] = [PREVIEW_W, PREVIEW_H]
+    out["mark_resolution"] = list(MAIN_SIZE)
 
     with open(calib_file, "w") as f:
         json.dump(out, f, indent=2)
@@ -510,6 +615,9 @@ def save_marks(all_marks, landmarks, calib_file):
 def main():
     parser = argparse.ArgumentParser(description="Mark landmark pixel coordinates for extrinsic calibration")
     parser.add_argument("--env", default=None, help="Environment name, e.g. RC or home")
+    parser.add_argument("--cams", default=None,
+                        help="Comma-separated camera ids to mark, e.g. 2 or 1,2 "
+                             "(default: all in CAMERAS)")
     parser.add_argument("--landmarks", default=None, help="Path to landmarks.json")
     parser.add_argument("--calib", default=None, help="Path to calib.json")
     args = parser.parse_args()
@@ -528,6 +636,16 @@ def main():
             landmarks_file = DEFAULT_LANDMARKS_FILE
         if calib_file is None:
             calib_file = DEFAULT_CALIB_FILE
+
+    if args.cams:
+        wanted = {int(c) for c in args.cams.split(",")}
+        cams_to_use = [c for c in CAMERAS if c["id"] in wanted]
+    else:
+        cams_to_use = list(CAMERAS)
+    if not cams_to_use:
+        print(f"ERROR: no cameras match --cams {args.cams}. Known: {[c['id'] for c in CAMERAS]}")
+        return
+    CAMERAS[:] = cams_to_use
 
     landmarks = load_landmarks(landmarks_file)
 
@@ -565,14 +683,42 @@ def main():
         click_pos   = [None]   # [(x, y)] or [None]
         pending_mark = [False]
 
+        mouse_main = [None]   # hover position in main-frame pixels, None outside the video
+        last_hover = [None]   # last hover position over the video
+        mag = {"in": False, "center": None, "cursor": None}   # mouse inside the magnifier
+
+        def on_mag_mouse(event, x, y, flags, param):
+            if not mag["in"]:
+                # Entering from the video: freeze the view on the active mark
+                # (or the last hover point if it has none yet) so it holds still.
+                mk = all_marks[CAMERAS[cam_idx]["id"]].get(landmarks[lm_idx]["id"])
+                mag["center"] = mk if mk is not None else last_hover[0]
+                mag["in"] = True
+            mag["cursor"] = (x, y)
+            if event == cv2.EVENT_LBUTTONDOWN and mag["center"] is not None:
+                click_pos[0]    = mag_to_main(mag["center"], (x, y))
+                pending_mark[0] = True
+
         def on_mouse(event, x, y, flags, param):
+            mag["in"] = False
+            if x < PREVIEW_W:
+                mouse_main[0] = (min(int(round(x * MARK_SCALE_X)), MAIN_SIZE[0] - 1),
+                                 min(int(round(y * MARK_SCALE_Y)), MAIN_SIZE[1] - 1))
+                last_hover[0] = mouse_main[0]
+            else:
+                mouse_main[0] = None
             if event == cv2.EVENT_LBUTTONDOWN:
                 # Only register clicks in the video pane (left side)
                 if x < PREVIEW_W:
-                    click_pos[0]    = (x, y)
+                    click_pos[0]    = (int(round(x * MARK_SCALE_X)),
+                                       int(round(y * MARK_SCALE_Y)))
                     pending_mark[0] = True
 
         cv2.setMouseCallback(WINDOW_NAME, on_mouse)
+
+        cv2.namedWindow(MAG_WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+        cv2.moveWindow(MAG_WINDOW_NAME, TOTAL_W + 20, 40)
+        cv2.setMouseCallback(MAG_WINDOW_NAME, on_mag_mouse)
 
         print("\n=== Extrinsic Calibration — Landmark Marking ===")
         print(f"Landmarks file: {landmarks_file}")
@@ -613,6 +759,14 @@ def main():
             cv2.line(canvas, (PREVIEW_W, 0), (PREVIEW_W, TOTAL_H), (80, 80, 100), 2)
 
             cv2.imshow(WINDOW_NAME, canvas)
+            if mag["in"]:
+                mag_view = render_magnifier(reader.get_full(), mag["center"], marks, landmarks,
+                                            lm_idx, cursor=mag["cursor"]) \
+                           if mag["center"] is not None else None
+            else:
+                mag_view = render_magnifier(reader.get_full(), mouse_main[0], marks, landmarks, lm_idx)
+            if mag_view is not None:
+                cv2.imshow(MAG_WINDOW_NAME, mag_view)
             key = cv2.waitKey(33) & 0xFF   # ~30 fps
 
             if key in (ord('q'), ord('Q'), 27):       # Q or Escape — quit

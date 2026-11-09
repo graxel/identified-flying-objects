@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-intrinsic_calibrate.py
+intrinsic/calibrate.py
 ----------------------
-After you've run intrinsic_capture.py and moved the good images to
-  calibration/intrinsic/camX/used/
+After you've run capture.py and moved the good images to
+  intrinsic/camX/used/
 ...run this script to compute the intrinsic camera matrix and distortion
 coefficients for each camera using OpenCV's chessboard calibration.
 
 Output for each camera is written to:
-  calibration/intrinsic/camX/result/intrinsic.json
+  intrinsic/camX/result/intrinsic.json
 
 The chessboard pattern parameters must match your physical board.
 
 Usage:
-    python3 intrinsic_calibrate.py [--board-w 9] [--board-h 6] [--square-mm 25]
+    uv run intrinsic/calibrate.py [--board-w 9] [--board-h 6] [--square-mm 25]   (from calibration/)
 
 Dependencies:
     uv pip install opencv-python numpy
@@ -27,13 +27,15 @@ import glob
 import argparse
 import sys
 
-SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
-INTRINSIC_DIR = os.path.join(SCRIPT_DIR, "intrinsic")
+from config import CAMERAS, INTRINSIC_DIR
 
-CAMERAS = [1, 2, 3, 4]
+# Intrinsics are only valid at the resolution they were calibrated at, so
+# images of any other size than the camera's main_size (e.g. older 4056x3040
+# captures) are skipped rather than mixed in.
+MAIN_SIZES = {c["id"]: tuple(c["main_size"]) for c in CAMERAS}
 
 
-def calibrate_camera(cam_id, board_w, board_h, square_mm, intrinsic_dir):
+def calibrate_camera(cam_id, board_w, board_h, square_mm, intrinsic_dir, expected_size):
     """
     Run chessboard calibration for one camera.
     board_w, board_h: number of interior corners (not squares)
@@ -81,8 +83,14 @@ def calibrate_camera(cam_id, board_w, board_h, square_mm, intrinsic_dir):
             continue
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        size = (gray.shape[1], gray.shape[0])
+        if expected_size and size != tuple(expected_size):
+            print(f"    [SKIP] {os.path.basename(path)} is {size[0]}x{size[1]}, "
+                  f"expected {expected_size[0]}x{expected_size[1]}")
+            bad += 1
+            continue
         if image_size is None:
-            image_size = (gray.shape[1], gray.shape[0])
+            image_size = size
 
         ret, corners = cv2.findChessboardCorners(gray, board_size, flags)
         if not ret:
@@ -140,17 +148,23 @@ def main():
     parser.add_argument("--board-w",   type=int,   default=9,  help="Inner corners wide  (default: 9)")
     parser.add_argument("--board-h",   type=int,   default=6,  help="Inner corners tall  (default: 6)")
     parser.add_argument("--square-mm", type=float, default=25, help="Square size in mm   (default: 25)")
-    parser.add_argument("--cam",       type=int,   default=None, help="Only calibrate this camera ID")
+    parser.add_argument("--size",      type=int,   nargs=2, metavar=("W", "H"), default=None,
+                        help="Required image size (default: the camera's main_size in config.py)")
+    parser.add_argument("--cam",       type=int,   default=None, choices=sorted(MAIN_SIZES), help="Only calibrate this camera ID")
     args = parser.parse_args()
 
     print(f"\n=== Intrinsic Calibration ===")
-    print(f"Board: {args.board_w}×{args.board_h} inner corners, {args.square_mm}mm squares\n")
+    print(f"Board: {args.board_w}×{args.board_h} inner corners, {args.square_mm}mm squares")
+    if args.size:
+        print(f"Image size: {args.size[0]}x{args.size[1]}")
+    print()
 
-    cam_ids = [args.cam] if args.cam else CAMERAS
+    cam_ids = [args.cam] if args.cam else sorted(MAIN_SIZES)
     any_ok  = False
     for cam_id in cam_ids:
         print(f"[cam{cam_id}]")
-        ok = calibrate_camera(cam_id, args.board_w, args.board_h, args.square_mm, INTRINSIC_DIR)
+        size = tuple(args.size) if args.size else MAIN_SIZES[cam_id]
+        ok = calibrate_camera(cam_id, args.board_w, args.board_h, args.square_mm, INTRINSIC_DIR, size)
         if ok:
             any_ok = True
         print()

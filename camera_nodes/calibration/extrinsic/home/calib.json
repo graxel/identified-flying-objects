@@ -1,0 +1,19 @@
+{
+  "cameras": {
+    "2": {
+      "location_enu": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "comment": "cam2 is the ENU origin (roof, 52 ft altitude)"
+    }
+  },
+  "coordinate_system": "ENU (meters)",
+  "units": "meters",
+  "enu_origin": {
+    "lat": 40.678708,
+    "lon": -74.006656,
+    "alt_m": 15.85
+  }
+}

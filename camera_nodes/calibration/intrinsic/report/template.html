@@ -1,0 +1,303 @@
+<title>Camera Lens Calibration</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Figures for the intrinsic calibration (numbers live in report.md). One column; a sticky camera picker drives every figure. */
+:root{
+  --bg:#eef0ee; --surface:#fafbfa; --ink:#18201d; --muted:#5b6661; --line:#d3d9d5;
+  --accent:#0d7468; --accent-soft:#d5ebe7;
+  --good:#2d9455; --warn:#c7841a; --bad:#cf3f3f;
+  --display:"Schibsted Grotesk",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111514; --surface:#181d1b; --ink:#e3e8e5; --muted:#97a29d; --line:#2b332f;
+  --accent:#3dbfae; --accent-soft:#16332f; --good:#4cc07a; --warn:#e2a23d; --bad:#ec6464; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111514; --surface:#181d1b; --ink:#e3e8e5; --muted:#97a29d; --line:#2b332f;
+  --accent:#3dbfae; --accent-soft:#16332f; --good:#4cc07a; --warn:#e2a23d; --bad:#ec6464; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--display);font-size:16px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:40px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(28px,4.5vw,40px);font-weight:700;letter-spacing:-.02em}
+h2{font-size:22px;font-weight:700}
+h3{font-size:16px;font-weight:600}
+p{margin:0}
+.stack{display:grid;gap:14px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.muted{color:var(--muted)}
+code{font-family:var(--mono);font-size:.9em}
+header{padding-top:36px;display:grid;gap:12px}
+.lede{font-size:17px;color:var(--muted);max-width:64ch}
+
+.picker{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;border-bottom:1px solid var(--line);
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{font:500 14px var(--mono);color:var(--muted);background:none;border:0;padding:8px 14px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--surface)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.picker .tag{font-size:14px;color:var(--muted);font-family:var(--mono)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;display:grid;gap:14px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:20px}
+.cap{font-size:14px;color:var(--muted)}
+svg{display:block;width:100%;height:auto;max-width:100%}
+svg text{fill:var(--muted);font-family:var(--mono);font-size:12px}
+.frame{fill:none;stroke:var(--ink);stroke-width:1.5}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:6px}
+
+.compare{position:relative;width:100%;max-width:100%;overflow:hidden;border-radius:8px;background:#000;user-select:none}
+.compare img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.compare .divider{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none}
+.compare .lbl{position:absolute;top:10px;font:500 12px var(--mono);color:#fff;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:4px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.toggle{display:inline-flex;gap:8px;align-items:center;font-size:14px;color:var(--muted)}
+.toggle input{accent-color:var(--accent)}
+
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:16px}
+figure{margin:0;display:grid;gap:8px;min-width:0}
+figure img{border-radius:8px;width:100%;border:1px solid var(--line)}
+figcaption{font-size:14px;display:grid;gap:2px}
+figcaption .name{font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.pill{display:inline-block;font:500 12px var(--mono);padding:2px 8px;border-radius:99px;color:var(--surface);width:max-content}
+footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Identified Flying Objects · intrinsic calibration · <span id="date"></span></div>
+  <h1>Lens calibration figures</h1>
+  <p class="lede">The figures for the intrinsic calibration. The numbers and the explanation of what they mean are in <code>report.md</code>, next to this file.</p>
+</header>
+
+<div class="picker" role="toolbar" aria-label="Choose camera">
+  <div class="seg" id="seg"></div>
+  <span class="tag" id="tag"></span>
+</div>
+
+<section class="stack">
+  <h2>Lens distortion</h2>
+  <div class="panel">
+    <h3>Raw photo vs. corrected</h3>
+    <div class="compare" id="cmp">
+      <img id="und" alt="Corrected photo">
+      <img id="raw" alt="Raw photo">
+      <div class="divider" id="div"></div>
+      <span class="lbl" style="left:10px">raw</span><span class="lbl" style="right:10px">corrected</span>
+    </div>
+    <input type="range" id="slider" min="0" max="100" value="50" aria-label="Slide between raw and corrected">
+    <p class="cap" id="cmpcap"></p>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3>Straight lines, as the camera records them</h3>
+      <svg id="grid" aria-label="Distorted grid"></svg>
+      <label class="toggle"><input type="checkbox" id="exag" checked> Exaggerate the bend 5×</label>
+      <p class="cap">Each curve is a straight line in the room, seen through this lens. The dashed lines show where a perfect pinhole would have put them. At true scale the bend is too small to see here.</p>
+    </div>
+    <div class="panel">
+      <h3>How far the correction moves each pixel</h3>
+      <canvas id="heat" width="480" height="360" style="width:100%;height:auto;border-radius:6px" aria-label="Distortion magnitude heatmap"></canvas>
+      <div class="legend" id="heatleg"></div>
+      <p class="cap" id="heatcap"></p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Distortion vs. angle from the lens axis, all cameras</h3>
+    <svg id="radial" aria-label="Radial distortion curves"></svg>
+    <div class="legend" id="radleg"></div>
+    <p class="cap" id="radcap"></p>
+  </div>
+</section>
+
+<section class="stack">
+  <h2>Fit quality</h2>
+  <div class="grid2">
+    <div class="panel">
+      <h3>Error per photo</h3>
+      <svg id="hist" aria-label="Histogram of per-photo error"></svg>
+      <p class="cap" id="histcap"></p>
+    </div>
+    <div class="panel">
+      <h3>Where the board was seen, and how well it fit there</h3>
+      <svg id="cells" aria-label="Board coverage and error by image region"></svg>
+      <div class="legend"><span><span class="sw" style="background:var(--good)"></span>&lt; 0.6 px</span><span><span class="sw" style="background:var(--warn)"></span>0.6–1.2 px</span><span><span class="sw" style="background:var(--bad)"></span>&gt; 1.2 px</span><span>dots: detected corners (sample)</span></div>
+      <p class="cap" id="cellcap"></p>
+    </div>
+  </div>
+</section>
+
+<section class="stack">
+  <h2>Rejected photos</h2>
+  <p class="cap" style="max-width:66ch">In each close-up, a line goes from each detected corner toward where the model expected it, drawn <b><span id="arrowx"></span>× longer</b> than the actual error. <span style="color:var(--good)">Green</span> is under 2 px off, <span style="color:var(--warn)">amber</span> 2–5 px, and <span style="color:var(--bad)">red</span> over 5 px.</p>
+  <div class="gallery" id="gallery"></div>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<script type="application/json" id="calib-data">__DATA__</script>
+<script>
+(function(){
+const RAW = JSON.parse(document.getElementById("calib-data").textContent);
+const D = RAW.cams, META = RAW.meta, B = META.board;
+const CAMS = Object.keys(D).map(Number);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const txt = (parent, attrs, s) => { const t = el("text", attrs, parent); t.textContent = s; return t; };
+const f0 = v => Math.round(v).toLocaleString();
+let cur = CAMS[0];
+
+$("date").textContent = META.date;
+$("arrowx").textContent = META.arrow_scale;
+$("foot").innerHTML = `Board: ${B.inner_corners_w} × ${B.inner_corners_h} inner corners, ${B.square_mm} mm squares. Generated ${META.date} by <code>calibration/intrinsic/report/report.py</code>.`;
+
+const seg = $("seg");
+CAMS.forEach(c => { const b = document.createElement("button"); b.textContent = "cam" + c; b.id = "pick" + c; b.onclick = () => select(c); seg.appendChild(b); });
+
+function select(c) {
+  cur = c;
+  CAMS.forEach(k => $("pick" + k).setAttribute("aria-pressed", k === c));
+  try { localStorage.setItem("cam", c); } catch (e) {}
+  render();
+}
+
+function render() {
+  const d = D[cur], [W, H] = d.size;
+  $("tag").textContent = `${W}×${H} · ${d.n} photos · RMS ${d.rms.toFixed(2)} px`;
+  drawCompare(d); drawGrid(d); drawHeat(d); drawRadial(); drawHist(d); drawCells(d); drawGallery(d);
+}
+
+function frameSvg(svg, W, H, pad = 0) { svg.innerHTML = ""; svg.setAttribute("viewBox", `${-pad} ${-pad} ${W + 2 * pad} ${H + 2 * pad}`); }
+
+// Raw vs corrected
+function drawCompare(d) {
+  $("raw").src = d.sample.raw; $("und").src = d.sample.und;
+  $("cmp").style.aspectRatio = `${d.size[0]}/${d.size[1]}`; slide();
+  $("cmpcap").textContent = `${d.sample.name}: the photo whose board reaches farthest toward the frame edge. Drag the slider and watch the board and straight edges near the border. ` +
+    ({ pincushion: "This lens pushes points outward, so the correction pulls the image inward, leaving thin black margins where the raw photo has no pixels.",
+       barrel: "This lens pulls points inward, so the correction pushes the image outward and crops a little at the edges.",
+       mixed: "This lens pushes points outward at some angles and pulls them inward at others, so the correction does the opposite of each." }[d.kind]) +
+    (d.disp.corner < 20 ? " The distortion is small, so the difference is subtle." : "");
+}
+function slide() { const v = $("slider").value; $("raw").style.clipPath = `inset(0 ${100 - v}% 0 0)`; $("div").style.left = `calc(${v}% - 1px)`; }
+$("slider").addEventListener("input", slide);
+
+// Distorted grid
+function drawGrid(d) {
+  const [W, H] = d.size, s = $("grid"); frameSvg(s, W, H, W * .03);
+  const k = $("exag").checked ? 5 : 1;
+  const cp = el("clipPath", { id: "gclip" }, el("defs", {}, s)); el("rect", { x: 0, y: 0, width: W, height: H }, cp);
+  const g = el("g", { "clip-path": "url(#gclip)" }, s);
+  d.lines.forEach(L => {
+    const n = L.d.length, [a, b] = L.i;
+    el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: css("--muted"), "stroke-width": 1, "stroke-dasharray": "4 5", "vector-effect": "non-scaling-stroke", "stroke-opacity": .6 }, g);
+    const pts = L.d.map((p, i) => { const t = i / (n - 1), ix = a[0] + (b[0] - a[0]) * t, iy = a[1] + (b[1] - a[1]) * t; return `${(ix + k * (p[0] - ix)).toFixed(1)},${(iy + k * (p[1] - iy)).toFixed(1)}`; }).join(" ");
+    el("polyline", { points: pts, fill: "none", stroke: css("--accent"), "stroke-width": 1.6, "vector-effect": "non-scaling-stroke" }, g);
+  });
+  el("rect", { x: 0, y: 0, width: W, height: H, class: "frame", "vector-effect": "non-scaling-stroke" }, s);
+}
+$("exag").addEventListener("change", () => drawGrid(D[cur]));
+
+// Displacement heatmap (shared scale across cameras)
+const MAXD = Math.max(...CAMS.map(c => D[c].disp.corner));
+function hex(h) { h = h.replace("#", ""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function ramp(t) { const a = hex(css("--surface")), b = hex(css("--accent")); t = Math.pow(Math.max(0, Math.min(1, t)), .8); return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`; }
+function drawHeat(d) {
+  const c = $("heat"), x = c.getContext("2d"), { nx, ny, v } = d.disp, cw = c.width / nx, ch = c.height / ny;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { x.fillStyle = ramp(v[j * nx + i] / MAXD); x.fillRect(i * cw, j * ch, cw + .5, ch + .5); }
+  x.strokeStyle = css("--ink"); x.lineWidth = 1; x.strokeRect(.5, .5, c.width - 1, c.height - 1);
+  $("heatleg").innerHTML = `<span>0 px</span><span style="display:inline-block;width:160px;height:10px;border-radius:3px;background:linear-gradient(90deg,${[0, .25, .5, .75, 1].map(ramp).join(",")})"></span><span>${f0(MAXD)} px</span><span>(same scale for all cameras)</span>`;
+  $("heatcap").textContent = `Barely anything at the center, growing toward the edges: ${f0(d.disp.edge_left)} px at the left/right edge midpoints, ${f0(d.disp.edge_top)} px at the top/bottom, ${f0(d.disp.corner)} px in the corners.`;
+}
+
+// Radial distortion curve, all cameras
+function drawRadial() {
+  const s = $("radial"); s.innerHTML = "";
+  const Wv = 760, Hv = 280, ml = 56, mr = 24, mt = 16, mb = 40; s.setAttribute("viewBox", `0 0 ${Wv} ${Hv}`);
+  const angImg = c => Math.atan(D[c].rmax_img) * 180 / Math.PI;
+  const maxA = Math.ceil(Math.max(...CAMS.map(angImg)) / 5) * 5 + 5;
+  const curves = {}; let lo = 0, hi = 0;
+  CAMS.forEach(c => {
+    const d = D[c];
+    curves[c] = d.curve.map(p => [Math.atan(p[0]) * 180 / Math.PI, d.fx * (p[1] - p[0])]).filter(p => p[0] <= angImg(c) + .01);
+    curves[c].forEach(p => { hi = Math.max(hi, p[1]); lo = Math.min(lo, p[1]); });
+  });
+  const step = 20; hi = Math.ceil(hi / step) * step; lo = Math.floor(lo / step) * step;
+  const X = a => ml + (Wv - ml - mr) * a / maxA, Y = v => Hv - mb - (Hv - mt - mb) * (v - lo) / (hi - lo || 1);
+  for (let a = 0; a <= maxA; a += 5) { el("line", { x1: X(a), x2: X(a), y1: mt, y2: Hv - mb, stroke: css("--line") }, s); txt(s, { x: X(a), y: Hv - mb + 18, "text-anchor": "middle" }, a + "°"); }
+  for (let v = lo; v <= hi; v += step) { el("line", { x1: ml, x2: Wv - mr, y1: Y(v), y2: Y(v), stroke: v === 0 ? css("--muted") : css("--line") }, s); txt(s, { x: ml - 8, y: Y(v) + 4, "text-anchor": "end" }, (v > 0 ? "+" : "") + v); }
+  txt(s, { x: (ml + Wv - mr) / 2, y: Hv - 4, "text-anchor": "middle" }, "angle from the lens axis");
+  txt(s, { x: 14, y: (mt + Hv - mb) / 2, "text-anchor": "middle", transform: `rotate(-90 14 ${(mt + Hv - mb) / 2})` }, "px moved (+ outward)");
+  const d = D[cur], aData = Math.atan(d.rmax_data) * 180 / Math.PI, aImg = angImg(cur);
+  el("rect", { x: X(aData), y: mt, width: Math.max(0, X(aImg) - X(aData)), height: Hv - mt - mb, fill: css("--warn"), "fill-opacity": .14 }, s);
+  el("line", { x1: X(aImg), x2: X(aImg), y1: mt, y2: Hv - mb, stroke: css("--warn"), "stroke-dasharray": "5 4" }, s);
+  txt(s, { x: X(aImg) - 6, y: Hv - mb - 8, "text-anchor": "end", style: `fill:${css("--warn")}` }, `cam${cur} frame corner`);
+  [...CAMS.filter(c => c !== cur), cur].forEach(c => {
+    const col = c === cur ? css("--accent") : css("--muted"), pts = curves[c];
+    el("polyline", { points: pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" "), fill: "none", stroke: col, "stroke-width": c === cur ? 3 : 1.3, "stroke-opacity": c === cur ? 1 : .55 }, s);
+    const last = pts[pts.length - 1];
+    txt(s, { x: X(last[0]) + 5, y: Y(last[1]) + 4, style: `fill:${col}` }, "cam" + c);
+  });
+  $("radleg").innerHTML = `<span><span class="sw" style="background:var(--accent)"></span>cam${cur}</span><span><span class="sw" style="background:var(--muted)"></span>other cameras</span><span><span class="sw" style="background:var(--warn);opacity:.4"></span>beyond the farthest board corner photographed (extrapolated)</span>`;
+  $("radcap").textContent = `Distortion depends only on the angle off-axis, so one curve describes the whole lens. Each curve stops at that camera's frame corner. For cam${cur}, the board was photographed out to ${aData.toFixed(1)}° and the frame corner is at ${aImg.toFixed(1)}°. The shaded band is where the model has to extrapolate.`;
+}
+
+// Per-photo error histogram
+function drawHist(d) {
+  const s = $("hist"); s.innerHTML = "";
+  const Wv = 460, Hv = 230, ml = 34, mr = 10, mt = 10, mb = 40; s.setAttribute("viewBox", `0 0 ${Wv} ${Hv}`);
+  const bw = .1, nb = 20, bins = new Array(nb).fill(0); d.per_image.forEach(v => bins[Math.min(nb - 1, Math.floor(v / bw))]++);
+  const my = Math.max(...bins), X = i => ml + (Wv - ml - mr) * i / nb, Y = v => mt + (Hv - mt - mb) * (1 - v / my);
+  for (let v = 0; v <= my; v += Math.max(1, Math.ceil(my / 4))) { el("line", { x1: ml, x2: Wv - mr, y1: Y(v), y2: Y(v), stroke: css("--line") }, s); txt(s, { x: ml - 6, y: Y(v) + 4, "text-anchor": "end" }, v); }
+  bins.forEach((b, i) => { const v = i * bw + bw / 2, col = v < .6 ? css("--good") : v < 1.2 ? css("--warn") : css("--bad");
+    if (b) el("rect", { x: X(i) + 1, y: Y(b), width: X(1) - X(0) - 2, height: Y(0) - Y(b), fill: col, rx: 2 }, s); });
+  for (let a = 0; a <= 2; a += .5) txt(s, { x: X(a / bw), y: Hv - mb + 16, "text-anchor": "middle" }, a.toFixed(1));
+  txt(s, { x: (ml + Wv - mr) / 2, y: Hv - 6, "text-anchor": "middle" }, "photo RMS error (px) · last bin = 1.9+");
+  const pi = d.per_image;
+  $("histcap").textContent = `Median photo ${pi[Math.floor(pi.length / 2)].toFixed(2)} px, 90% under ${pi[Math.floor(pi.length * .9)].toFixed(2)} px. The photos on the right mostly have steep board angles. They're harder to fit, but they help pin down the focal length.`;
+}
+
+// Coverage + error by region
+function drawCells(d) {
+  const [W, H] = d.size, s = $("cells"); frameSvg(s, W, H, W * .02);
+  const [gx, gy] = d.grid, cw = W / gx, ch = H / gy;
+  d.cells.forEach(([n, e], i) => { if (n) el("rect", { x: (i % gx) * cw, y: Math.floor(i / gx) * ch, width: cw, height: ch,
+    fill: e < .6 ? css("--good") : e < 1.2 ? css("--warn") : css("--bad"), "fill-opacity": .18 + .5 * Math.min(1, n / 400) }, s); });
+  const g = el("g", { fill: css("--ink"), "fill-opacity": .45 }, s), r = W / 400;
+  d.coverage.forEach(([x, y]) => el("circle", { cx: x, cy: y, r }, g));
+  el("rect", { x: 0, y: 0, width: W, height: H, class: "frame", "vector-effect": "non-scaling-stroke" }, s);
+  const empty = d.cells.filter(c => !c[0]).length;
+  $("cellcap").textContent = `Each cell is colored by the average error of the corners detected in it; darker cells had more corners. ${empty ? `${empty} of ${gx * gy} cells never saw a corner.` : "Every region of the frame saw the board."}`;
+}
+
+// Rejected photos
+function drawGallery(d) {
+  const g = $("gallery");
+  if (!d.rejected.length) { g.innerHTML = `<p class="muted">No photos rejected for cam${cur}.</p>`; return; }
+  g.innerHTML = d.rejected.map(r => {
+    const col = !r.found ? "var(--muted)" : r.rms > 5 ? "var(--bad)" : "var(--warn)";
+    const stats = r.found ? ` Photo RMS ${r.rms} px, worst corner ${r.max} px.` : "";
+    return `<figure><img src="${r.img}" alt="${r.name}" loading="lazy"><figcaption><span class="pill" style="background:${col}">${r.label}</span><span>${r.why}${stats}</span><span class="name">${r.name}</span></figcaption></figure>`;
+  }).join("");
+}
+
+let start = CAMS[0];
+try { const s = +localStorage.getItem("cam"); if (CAMS.includes(s)) start = s; } catch (e) {}
+select(start);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>

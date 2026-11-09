@@ -43,7 +43,7 @@ def load_intrinsic(cam_id, intrinsic_dir):
     result_file = os.path.join(intrinsic_dir, f"cam{cam_id}", "result", "intrinsic.json")
     if not os.path.exists(result_file):
         print(f"  [WARN] No intrinsic result for cam{cam_id} at {result_file}")
-        print("         Run intrinsic_calibrate.py first, or solvePnP will use identity K.")
+        print("         Run intrinsic/calibrate.py first, or solvePnP will use identity K.")
         return None, None, None
     with open(result_file) as f:
         data = json.load(f)

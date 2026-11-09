@@ -4,16 +4,23 @@ All scripts here run **on your laptop**, connecting to the cameras over SSH.
 
 ```
 calibration/
-├── intrinsic_capture.py     # Step 1 — capture chessboard photos
-├── intrinsic_calibrate.py   # Step 2 — compute K & distortion per camera
 ├── extrinsic_mark.py        # Step 3 — mark landmark pixels per camera
 ├── extrinsic_solve.py       # Step 4 — compute rotation/projection matrices
 ├── ray_utils.py             # Library — pixel → ENU ray, triangulation, ENU↔WGS84
 ├── pyproject.toml           # Laptop dependencies (opencv-python, numpy)
 │
 ├── intrinsic/
-│   ├── cam1/  cam2/  cam3/  cam4/
-│   │   ├── captures/        # Raw captured JPEGs (auto-populated by Step 1)
+│   ├── capture.py           # Step 1 — capture chessboard photos
+│   ├── calibrate.py         # Step 2 — compute K & distortion per camera
+│   ├── config.py            # Cameras (host, resolution, flip), timing, health limits
+│   ├── cycle.py             # Step 1's green → yellow → red → result capture cycle
+│   ├── camera_link.py       # Laptop's connection to one camera, and its health checks
+│   ├── camera_node.py       # Runs on each Pi during Step 1 (copied to ~/ifo_capture/)
+│   ├── protocol.py          # Messages between camera_link and camera_node
+│   ├── remote.py            # SSH: copy/start camera_node, stop/start camera.service
+│   ├── render.py            # The preview window
+│   ├── cam1/ … cam5/
+│   │   ├── captures/        # Raw captured PNGs (auto-populated by Step 1)
 │   │   ├── used/            # Move good images here manually before Step 2
 │   │   └── result/
 │   │       └── intrinsic.json  # Output of Step 2
@@ -42,11 +49,17 @@ ssh cameron@cam1.local
 ## Step 1 — Intrinsic Capture
 
 ```bash
-uv run intrinsic_capture.py
+uv run intrinsic/capture.py            # all cameras: 1-4 (IMX500, 3840×2880) + 5 (kalman's ov5647, 2560×1944)
+uv run intrinsic/capture.py --cams 5   # only some cameras
 ```
 
-- Four live preview feeds appear in a 2×2 quadrant window.
-- Every **5 seconds**: 3s green (get in position) → 1s red (hold still) → hi-res capture → 1s display.
+- Live quarter-resolution previews appear in a grid, one cell per camera.
+- Each cycle works like a traffic light:
+  - **Green** (4s): move the board freely.
+  - **Yellow** (1s): a capture is coming, so get still.
+  - **Red**: capturing, so hold still. Stays up until every camera confirms it grabbed a frame exposed after the request. A camera that can't do that within 0.3s rejects the capture rather than saving a frame taken while you were moving.
+  - **Result**: the photo each camera just took, shown for 1.5s after the last one arrives.
+- Green only moves on to yellow while every camera is streaming healthily. A camera that is still starting, has stalled, is lagging, or is still sending its last photo holds the cycle at green ("Waiting for cameras", with the reason on that camera's cell). If a camera goes unhealthy during yellow, the capture is called off. A stalled camera's connection is restarted automatically.
 - Captured images land in `intrinsic/camX/captures/`.
 - Aim for **20–40 diverse captures** per camera (different orientations, distances, corners).
 - Press **Q** to quit.
@@ -56,16 +69,21 @@ uv run intrinsic_capture.py
 ## Step 2 — Intrinsic Calibration
 
 1. Review `intrinsic/camX/captures/` and move the **best 20+ images** to `intrinsic/camX/used/`.
-2. Run:
+2. Run (each camera's images are checked against its `main_size` in `intrinsic/config.py`):
 
 ```bash
-uv run intrinsic_calibrate.py --board-w 9 --board-h 6 --square-mm 25
+uv run intrinsic/calibrate.py --board-w 9 --board-h 6 --square-mm 25
 ```
 
 Adjust `--board-w` / `--board-h` to your board's **interior corner count** (not square count),
 and `--square-mm` to your square size. Output: `intrinsic/camX/result/intrinsic.json`.
 
 **RMS reprojection error < 0.5 px is excellent; < 1.0 px is acceptable.**
+
+## Intrinsic Calibration Results
+
+I put together a page with Claude that explains the results of the intrinsic calibration. Check it out here: 
+[<img alt="Results Page" width="400px" src="intrinsic_calibration_results.png" />](https://claude.ai/artifact/G6satGqd396r9zFAK9xC7k)
 
 ---
 
